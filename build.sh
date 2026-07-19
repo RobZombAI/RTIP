@@ -1,25 +1,38 @@
 #!/bin/bash
-# ── Build RTIP.app ──
 set -e
 DIR="$(cd "$(dirname "$0")" && pwd)"
 APP="$DIR/RTIP.app"
 SOURCES="$DIR/sources"
+VENV="/Users/robzomb/qwen3-tts-ui/venv"
 
 echo "🔨 Building RTIP.app..."
 
-# Clean
 rm -rf "$APP" 2>/dev/null
-mkdir -p "$APP/Contents/MacOS"
-mkdir -p "$APP/Contents/Resources"
+mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 
-# Launcher
+# Launcher — venv with pywebview + port cleanup
 cat > "$APP/Contents/MacOS/RTIP" << 'LAUNCHER'
 #!/bin/bash
-export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
 DIR="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$DIR" || exit 1
 LOGFILE="$HOME/.rtip.log"
-exec python3 "$DIR/Resources/main.py" > "$LOGFILE" 2>&1
+VENV="/Users/robzomb/qwen3-tts-ui/venv"
+export PATH="$VENV/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
+unset PYTHONHOME PYTHONPATH
+
+echo "[$(date)] Starting RTIP..." > "$LOGFILE"
+
+# Kill any leftover python processes holding pywebview ports
+for port in 8125 8126 8127 8128; do
+  PID=$(lsof -ti :$port 2>/dev/null)
+  if [ -n "$PID" ]; then
+    kill -9 $PID 2>/dev/null
+    echo "[$(date)] Freed port $port (PID $PID)" >> "$LOGFILE"
+  fi
+done
+
+echo "[$(date)] Python: $VENV/bin/python3" >> "$LOGFILE"
+exec "$VENV/bin/python3" -u "$DIR/Resources/main.py" >> "$LOGFILE" 2>&1
 LAUNCHER
 chmod +x "$APP/Contents/MacOS/RTIP"
 
@@ -50,19 +63,16 @@ cat > "$APP/Contents/Info.plist" << PLIST
 </dict>
 </plist>
 PLIST
-
-# PkgInfo
 echo "APPL????" > "$APP/Contents/PkgInfo"
 
-# Sources
+# Source files
 cp "$SOURCES/main.py" "$APP/Contents/Resources/main.py"
 cp "$SOURCES/resources/index.html" "$APP/Contents/Resources/index.html"
 cp "$SOURCES/resources/api.js" "$APP/Contents/Resources/api.js"
 
 # Validate
 python3 -c "import ast; ast.parse(open('$APP/Contents/Resources/main.py').read()); print('✅ main.py OK')"
-echo "✅ API JS: $(wc -c < $APP/Contents/Resources/api.js) bytes"
-echo "✅ HTML: $(wc -c < $APP/Contents/Resources/index.html) bytes"
+echo "✅ Built: $(wc -c < $APP/Contents/Resources/api.js) bytes JS · $(wc -c < $APP/Contents/Resources/index.html) bytes HTML"
 
 # Install
 rm -rf "$HOME/Applications/RTIP.app" 2>/dev/null

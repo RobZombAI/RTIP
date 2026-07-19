@@ -455,29 +455,34 @@ class Api:
 
 def on_shutdown():
     stop_all()
-
 if __name__ == '__main__':
+    print('[RTIP] Starting...', flush=True)
     atexit.register(on_shutdown)
     signal.signal(signal.SIGTERM, lambda *a: (stop_all(), sys.exit(0)))
     signal.signal(signal.SIGINT, lambda *a: (stop_all(), sys.exit(0)))
 
     api = Api()
+    print('[RTIP] API created', flush=True)
 
-    # Start idle cleanup daemon
+    print('[RTIP] Starting idle cleanup...', flush=True)
     threading.Thread(target=idle_cleanup, daemon=True).start()
 
-    # Load OCR by default (first tab)
+    print('[RTIP] Starting init_default...', flush=True)
     def init_default():
         if OCR_MODEL.exists():
+            print('[RTIP] Ensuring OCR ready...', flush=True)
             ensure_ocr_ready()
         elif LLM_MODEL.exists():
+            print('[RTIP] Ensuring LLM ready...', flush=True)
             ensure_llm_ready()
     threading.Thread(target=init_default, daemon=True).start()
 
     url = os.path.join(str(RESOURCES), 'index.html')
     if not os.path.exists(url):
         url = os.path.join(str(APP_DIR.parent / 'Resources'), 'index.html')
+    print(f'[RTIP] URL: {url}', flush=True)
 
+    print('[RTIP] Creating window...', flush=True)
     window = webview.create_window(
         title='RTIP — ReadingTextImgPdf',
         url=url,
@@ -487,6 +492,7 @@ if __name__ == '__main__':
         confirm_close=True, text_select=True,
     )
     api.window = window
+    print('[RTIP] Window created, starting webview...', flush=True)
 
     webview.start(debug=False, http_server=True, private_mode=False)
     stop_all()
