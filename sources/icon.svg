@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#1a1a2e"/>
+      <stop offset="100%" style="stop-color:#16213e"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="100" fill="url(#bg)"/>
+  
+  <!-- Book -->
+  <g transform="translate(140,160)">
+    <rect x="0" y="0" width="60" height="80" rx="4" fill="#58a6ff" opacity="0.3"/>
+    <rect x="6" y="4" width="48" height="72" rx="2" fill="#1f6feb"/>
+    <line x1="14" y1="20" x2="46" y2="20" stroke="#fff" stroke-width="2" opacity="0.7"/>
+    <line x1="14" y1="32" x2="46" y2="32" stroke="#fff" stroke-width="2" opacity="0.5"/>
+    <line x1="14" y1="44" x2="36" y2="44" stroke="#fff" stroke-width="2" opacity="0.5"/>
+  </g>
+  
+  <!-- Magnifying glass -->
+  <g transform="translate(280,140)">
+    <circle cx="40" cy="40" r="32" fill="none" stroke="#3fb950" stroke-width="6"/>
+    <circle cx="40" cy="40" r="28" fill="none" stroke="#3fb950" stroke-width="2" opacity="0.3"/>
+    <line x1="63" y1="63" x2="85" y2="85" stroke="#3fb950" stroke-width="8" stroke-linecap="round"/>
+  </g>
+  
+  <!-- Image/photo icon -->
+  <g transform="translate(150,300)">
+    <rect x="0" y="0" width="55" height="45" rx="4" fill="#d29922" opacity="0.3"/>
+    <rect x="3" y="3" width="49" height="39" rx="3" fill="#d29922" opacity="0.7"/>
+    <polygon points="3,38 20,22 32,32 42,18 52,38" fill="#fff" opacity="0.4"/>
+    <circle cx="16" cy="16" r="5" fill="#fff" opacity="0.5"/>
+  </g>
+  
+  <!-- Text lines -->
+  <g transform="translate(280,310)">
+    <rect x="0" y="0" width="90" height="6" rx="3" fill="#8b949e" opacity="0.6"/>
+    <rect x="0" y="12" width="75" height="6" rx="3" fill="#8b949e" opacity="0.4"/>
+    <rect x="0" y="24" width="80" height="6" rx="3" fill="#8b949e" opacity="0.4"/>
+    <rect x="0" y="36" width="65" height="6" rx="3" fill="#8b949e" opacity="0.3"/>
+  </g>
+  
+  <!-- RTIP text -->
+  <text x="256" y="460" text-anchor="middle" font-family="monospace" font-size="32"
+        font-weight="bold" fill="#58a6ff" letter-spacing="8">RTIP</text>
+</svg>

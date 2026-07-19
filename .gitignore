@@ -1,0 +1,13 @@
+# Output files
+output/
+*.txt
+
+# macOS
+.DS_Store
+*.app
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/

@@ -1,0 +1,10 @@
+#!/bin/bash
+DIR="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$DIR" || exit 1
+LOGFILE="$HOME/.rtip.log"
+
+VENV="/Users/robzomb/qwen3-tts-ui/venv"
+export PATH="$VENV/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
+unset PYTHONHOME PYTHONPATH
+
+exec "$VENV/bin/python3" -u "$DIR/Resources/main.py" > "$LOGFILE" 2>&1
