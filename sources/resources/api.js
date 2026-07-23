@@ -12,10 +12,31 @@ let currentSid = null;
 let currentSavePath = '';
 let chatHistory = [];
 let sessions = [];
+let systemInfo = null;
 
 document.addEventListener('DOMContentLoaded', () => {
-  if (typeof pywebview !== 'undefined') { pollStatus(); refreshSessions(); }
+  if (typeof pywebview !== 'undefined') { initSystem(); pollStatus(); refreshSessions(); }
 });
+
+async function initSystem() {
+  try {
+    systemInfo = JSON.parse(await pywebview.api.get_system_info());
+    showSystemInfo();
+  } catch(e) { console.error(e); }
+}
+
+function showSystemInfo() {
+  if (!systemInfo) return;
+  const bar = document.getElementById('statusBar');
+  const existing = document.getElementById('sysInfo');
+  if (existing) existing.remove();
+  const el = document.createElement('span');
+  el.id = 'sysInfo';
+  el.style.cssText = 'font-size:10px;color:var(--text2);margin-left:auto;';
+  el.textContent = '🧠 ' + systemInfo.ram_gb + 'GB · ' + systemInfo.msg_ocr + ' · ' + systemInfo.msg_llm;
+  bar.appendChild(el);
+  if (systemInfo.llm && !systemInfo.llm_file) addDownloadUI();
+}
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
@@ -292,3 +313,38 @@ function copyAll() {
 function openFolder() { if (currentSavePath) pywebview.api.open_folder(currentSavePath); }
 function showCopy() { const el = document.getElementById('copyToast'); el.classList.add('visible'); clearTimeout(window._ct); window._ct = setTimeout(() => el.classList.remove('visible'), 2000); }
 function escHtml(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+
+// ═══ Download UI ──
+function addDownloadUI() {
+  const bar = document.getElementById('statusBar');
+  if (!bar || document.getElementById('downloadBtn')) return;
+  const btn = document.createElement('button');
+  btn.className = 'btn btn-primary btn-sm';
+  btn.id = 'downloadBtn';
+  btn.textContent = '⬇️ Download Agents A1 (34GB)';
+  btn.onclick = () => {
+    btn.disabled = true;
+    btn.textContent = '⏳ Downloading…';
+    pywebview.api.download_llm();
+  };
+  bar.appendChild(btn);
+}
+
+function downloadProgress(data) {
+  const btn = document.getElementById('downloadBtn');
+  if (!btn) return;
+  if (data.pct === -1) {
+    btn.textContent = '❌ ' + data.msg;
+    btn.disabled = false;
+  } else if (data.pct === 100) {
+    btn.textContent = '✅ Downloaded!';
+    setTimeout(() => btn.remove(), 3000);
+  } else {
+    btn.textContent = '⏳ ' + data.pct + '% · ' + data.msg;
+  }
+}
+
+function llmDownloaded() {
+  const btn = document.getElementById('downloadBtn');
+  if (btn) { btn.textContent = '✅ Restart app to load Agents A1'; btn.disabled = true; }
+}

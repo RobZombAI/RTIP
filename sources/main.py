@@ -54,6 +54,45 @@ LLAMA_SERVER = shutil.which('llama-server') or '/opt/homebrew/bin/llama-server'
 llm_process = None
 
 # ═══════════════════════════════════════════
+#  RAM Detection & Model Compatibility
+# ═══════════════════════════════════════════
+
+def get_system_ram_gb():
+    """Returns total RAM in GB. Defaults to 8 if psutil not available."""
+    try:
+        import psutil
+        return round(psutil.virtual_memory().total / 1073741824)
+    except:
+        return 8
+
+TOTAL_RAM_GB = get_system_ram_gb()
+
+# Model requirements (estimated peak usage)
+MODEL_REQUIREMENTS = {
+    'ocr': {'name': 'LightOnOCR-2-1B', 'min_ram_gb': 4, 'file': None, 'size_gb': 2},
+    'llm': {'name': 'Agents A1 Q8_0', 'min_ram_gb': 48, 'file': LLM_MODEL, 'size_gb': 34},
+}
+
+# Determine which models are compatible
+OCR_OK = TOTAL_RAM_GB >= MODEL_REQUIREMENTS['ocr']['min_ram_gb']
+LLM_OK = TOTAL_RAM_GB >= MODEL_REQUIREMENTS['llm']['min_ram_gb']
+LLM_FILE_EXISTS = LLM_MODEL.exists()
+SYSTEM_INFO = {
+    'ram_gb': TOTAL_RAM_GB,
+    'ocr': OCR_OK,
+    'llm': LLM_OK,
+    'llm_file': LLM_FILE_EXISTS,
+    'llm_model_name': 'Agents A1',
+    'llm_file_size': '34 GB',
+    'llm_download_url': 'https://huggingface.co/robzombai/Agents-A1-GGUF/resolve/main/Agents-A1-Q8_0.gguf',
+    'msg_ocr': '✅ LightOnOCR ready' if OCR_OK else '❌ Need 4GB+ RAM for OCR',
+    'msg_llm': f'✅ Agents A1 ready ({TOTAL_RAM_GB}GB RAM)' if LLM_OK and LLM_FILE_EXISTS
+               else (f'⚠️ Need {MODEL_REQUIREMENTS["llm"]["min_ram_gb"]}GB+ RAM for Agents A1 (have {TOTAL_RAM_GB}GB)'
+                     if not LLM_OK
+                     else f'⚠️ Download Agents A1 ({MODEL_REQUIREMENTS["llm"]["size_gb"]}GB) to enable AI features'),
+}
+
+# ═══════════════════════════════════════════
 #  LLM (Agents A1)
 # ═══════════════════════════════════════════
 
@@ -65,6 +104,7 @@ def llm_alive():
 
 def start_llm():
     global llm_process
+    if not LLM_OK: return False
     if llm_alive(): return True
     if not LLM_MODEL.exists(): return False
     cmd = [LLAMA_SERVER, '--model', str(LLM_MODEL), '--host', '127.0.0.1', '--port', '8081',
@@ -164,7 +204,10 @@ class Api:
     def ping(self): return 'pong'
 
     def get_status(self):
-        return {'ocr': is_loaded(), 'llm': llm_alive(), 'llm_model': LLM_MODEL.exists()}
+        return {'ocr': is_loaded(), 'llm': llm_alive(), 'llm_model': LLM_FILE_EXISTS}
+
+    def get_system_info(self):
+        return json.dumps(SYSTEM_INFO)
 
     # ── Models ──
     def start_ocr(self):
@@ -190,6 +233,28 @@ class Api:
     def stop_llm(self):
         stop_llm()
         if self.window: self.window.evaluate_js("updateStatus({'llm': False})")
+
+    def download_llm(self):
+        """Download Agents A1 model in background."""
+        def task():
+            import urllib.request
+            url = 'https://huggingface.co/robzombai/Agents-A1-GGUF/resolve/main/Agents-A1-Q8_0.gguf'
+            dest = str(LLM_MODEL)
+            try:
+                if self.window:
+                    self.window.evaluate_js(f"downloadProgress({json.dumps({'pct':0,'msg':'Starting download...'})})")
+                urllib.request.urlretrieve(url, dest, reporthook=lambda b, bs, sz: (
+                    self.window and self.window.evaluate_js(
+                        f"downloadProgress({json.dumps({'pct':round(100*b*bs/sz),'msg':f'{round(b*bs/1048576)}MB / {round(sz/1048576)}MB'})})")
+                ) if self.window else None)
+                if self.window:
+                    self.window.evaluate_js("downloadProgress({'pct':100,'msg':'Download complete!'})")
+                    self.window.evaluate_js("llmDownloaded()")
+            except Exception as e:
+                if self.window:
+                    self.window.evaluate_js(f"downloadProgress({json.dumps({'pct':-1,'msg':str(e)})})")
+        threading.Thread(target=task, daemon=True).start()
+        return 'downloading'
 
     # ── Sessions ──
     def get_sessions(self):
@@ -346,10 +411,12 @@ if __name__ == '__main__':
     threading.Thread(target=auto_install, daemon=True).start()
     api = Api()
 
-    # Start both models in background
+    # Start both models in background (only if RAM-compatible)
     def boot():
-        ocr_ensure()
-        start_llm()
+        if OCR_OK:
+            ocr_ensure()
+        if LLM_OK:
+            start_llm()
     threading.Thread(target=boot, daemon=True).start()
 
     url = os.path.join(str(RESOURCES), 'index.html')
