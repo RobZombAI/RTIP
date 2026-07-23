@@ -24,6 +24,8 @@ def auto_install():
     except: missing.append('pillow')
     try: import torchvision
     except: missing.append('torchvision')
+    try: import fitz
+    except: missing.append('PyMuPDF')
     if missing:
         for dep in missing:
             subprocess.run([sys.executable, '-m', 'pip', 'install', dep],
