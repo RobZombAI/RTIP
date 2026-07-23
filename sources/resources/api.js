@@ -16,6 +16,7 @@ let systemInfo = null;
 
 document.addEventListener('DOMContentLoaded', () => {
   if (typeof pywebview !== 'undefined') { initSystem(); pollStatus(); refreshSessions(); }
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && isProcessing) cancelCurrent(); });
 });
 
 async function initSystem() {
@@ -292,8 +293,12 @@ function showProgress(label) {
   document.getElementById('progressOverlay').classList.add('visible');
   document.getElementById('progressLabel').textContent = label;
   document.getElementById('progressDetail').textContent = '';
+  document.getElementById('globalCancelBtn').style.display = '';
 }
-function hideProgress() { document.getElementById('progressOverlay').classList.remove('visible'); }
+function hideProgress() {
+  document.getElementById('progressOverlay').classList.remove('visible');
+  document.getElementById('globalCancelBtn').style.display = 'none';
+}
 
 // ═══ Utils ──
 function showError(m) { hideProgress(); isProcessing = false;
