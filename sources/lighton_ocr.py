@@ -49,7 +49,7 @@ def ensure_loaded():
         try:
             from transformers import LightOnOcrForConditionalGeneration, AutoProcessor
             device = 'mps' if torch.backends.mps.is_available() else 'cpu'
-            dtype = torch.float16 if device == 'mps' else torch.float32
+            dtype = torch.float32  # float16 causes NaN on MPS during generation
 
             processor = AutoProcessor.from_pretrained(MODEL_ID, trust_remote_code=True)
             model = LightOnOcrForConditionalGeneration.from_pretrained(
@@ -107,8 +107,7 @@ def ocr_image(image_path, prompt="Extract all text from this image."):
             inputs = processor.apply_chat_template(
                 conv, add_generation_prompt=True,
                 tokenize=True, return_dict=True, return_tensors='pt')
-            inputs = {k: v.to(device, dtype=torch.float16) if v.is_floating_point() else v.to(device)
-                      for k, v in inputs.items()}
+            inputs = {k: v.to(device) if hasattr(v, 'to') else v for k, v in inputs.items()}
 
             with torch.no_grad():
                 ids = model.generate(**inputs, max_new_tokens=MAX_TOKENS, use_cache=True)
