@@ -89,8 +89,7 @@ header h1 span { color:var(--accent); }
 .page-nav button:disabled { opacity:.3; cursor:default; }
 
 /* Chat */
-.chat-section { display:none; border-top:1px solid var(--border); background:var(--surface); padding:6px 10px; flex-shrink:0; }
-.chat-section.visible { display:flex; flex-direction:column; gap:4px; }
+.chat-section { border-top:1px solid var(--border); background:var(--surface); padding:6px 10px; flex-shrink:0; display:flex; flex-direction:column; gap:4px; }
 .chat-input { display:flex; gap:4px; }
 .chat-input textarea { flex:1; min-height:30px; max-height:60px; padding:4px 8px; border:1px solid var(--border); border-radius:4px; background:var(--bg); color:var(--text); font-size:11px; outline:none; resize:vertical; }
 .chat-input textarea:focus { border-color:var(--accent); }
@@ -210,7 +209,9 @@ footer { text-align:center; padding:3px; font-size:8px; color:var(--text2); bord
       </div>
       <div class="result-body" id="resultBody"><div class="loading-indicator"><div class="spinner"></div><div>Select a file to start</div></div></div>
       <div class="chat-section" id="chatSection">
-        <div class="chat-messages" id="chatMessages"></div>
+        <div class="chat-messages" id="chatMessages">
+          <div class="chat-msg system">💬 Chat — fai domande sul testo estratto</div>
+        </div>
         <div class="chat-input">
           <textarea id="chatInput" placeholder="Ask about this document…" rows="1"></textarea>
           <button class="btn btn-primary btn-sm" onclick="chatSend()">➤</button>

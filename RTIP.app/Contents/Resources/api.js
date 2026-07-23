@@ -92,13 +92,19 @@ async function openSession(sid) {
     currentPage = 0;
     currentSavePath = '';
     currentType = data.type;
+    chatHistory = data.chat || [];
     showPage(0);
     document.getElementById('resultArea').classList.add('visible');
     document.getElementById('resultTitle').textContent = data.type === 'pdf' ? '📄 ' + data.file : '🖼️ ' + data.file;
     document.getElementById('saveToast').classList.remove('visible');
     document.getElementById('actionBtns').style.display = '';
-    document.getElementById('chatSection').classList.remove('visible');
-    document.getElementById('chatMessages').innerHTML = '';
+    // Restore chat history
+    const m = document.getElementById('chatMessages');
+    m.innerHTML = '<div class="chat-msg system">💬 Chat — fai domande sul testo estratto</div>';
+    chatHistory.forEach(c => {
+      if (c.role === 'user') addChat('user', c.content);
+      if (c.role === 'assistant') addChat('assistant', c.content);
+    });
     if (currentPages.length > 1) {
       document.getElementById('pageNav').style.display = '';
       document.getElementById('pageTotal').textContent = currentPages.length;
@@ -127,11 +133,11 @@ document.getElementById('dropZone').addEventListener('click', async () => {
 
 async function selectFile(path) {
   selectedPath = path; currentPage = 0; currentPages = [];
-  currentType = null; currentFullText = ''; currentSid = null;
+  currentType = null; currentFullText = ''; currentSid = null; chatHistory = [];
   document.getElementById('pageNav').style.display = 'none';
   document.getElementById('actionBtns').style.display = 'none';
-  document.getElementById('chatSection').classList.remove('visible');
   document.getElementById('saveToast').classList.remove('visible');
+  document.getElementById('chatMessages').innerHTML = '<div class="chat-msg system">💬 Chat — fai domande sul testo estratto</div>';
   hideError();
 
   const info = await pywebview.api.file_info(path);
@@ -203,7 +209,7 @@ function streamPage(data) {
 function showResult(data) {
   hideProgress(); isProcessing = false;
   currentFullText = data.raw; currentSavePath = data.save_path;
-  currentSid = data.sid; currentPage = 0;
+  currentSid = data.sid; currentPage = 0; chatHistory = [];
   currentPages = data.pages.map(p => p.text);
   showPage(0);
   document.getElementById('savePath').textContent = data.save_path;
@@ -240,8 +246,6 @@ function llmAction(action) {
   btn.textContent = labels[action] || '⏳ Processing…';
   btn.disabled = true;
   showProgress(labels[action] || 'Processing…');
-  document.getElementById('chatSection').classList.add('visible');
-  document.getElementById('chatMessages').innerHTML = '';
   addChat('system', '🤖 Agents A1 processing…');
   pywebview.api.llm_process(currentFullText, action, lang).then(() => {
     btn.textContent = action.charAt(0).toUpperCase() + action.slice(1);
@@ -252,6 +256,8 @@ function llmAction(action) {
 function llmResponse(text) {
   hideProgress();
   document.getElementById('chatMessages').innerHTML = '';
+  chatHistory.push({role: 'assistant', content: text});
+  if (currentSid) pywebview.api.save_chat(currentSid, JSON.stringify(chatHistory));
   addChat('assistant', text);
   // Replace main result with processed text
   currentFullText = text;
@@ -295,13 +301,20 @@ function chatSend() {
   const msg = inp.value.trim();
   if (!msg) return;
   inp.value = '';
-  document.getElementById('chatSection').classList.add('visible');
   addChat('user', msg);
   addChat('assistant', '<span class="loading-dots">Thinking</span>');
-  const pageText = currentPages[currentPage] || '';
-  const context = currentFullText ? 'Context from document:\n' + currentFullText.slice(0, 5000) + '\n\n' : '';
-  pywebview.api.llm_chat((context || '') + msg, JSON.stringify(chatHistory));
+  // Always include full document context + current page in every message
+  const context = currentFullText
+    ? 'Document text (' + currentFullText.length + ' chars):\n' + currentFullText + '\n\n---\n'
+    : '';
+  const pageContext = currentPages[currentPage]
+    ? 'Currently viewing page ' + (currentPage + 1) + ':\n' + currentPages[currentPage]
+    : '';
+  const fullMsg = (context || '') + (pageContext ? pageContext + '\n\n---\n' : '') + 'User question: ' + msg;
+  pywebview.api.llm_chat(fullMsg, JSON.stringify(chatHistory));
   chatHistory.push({role: 'user', content: msg});
+  // Auto-save chat to session
+  if (currentSid) pywebview.api.save_chat(currentSid, JSON.stringify(chatHistory));
 }
 
 function addChat(role, text) {

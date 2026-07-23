@@ -149,8 +149,7 @@ def create_session(file_name, file_type, raw_text, pages):
         'id': sid, 'file': file_name, 'type': file_type, 'pages': len(pages),
         'chars': len(raw_text), 'date': datetime.now().isoformat(),
     }
-    # Save full data to individual file
-    data = {**entry, 'raw': raw_text, 'pages': pages}
+    data = {**entry, 'raw': raw_text, 'pages': pages, 'chat': []}
     (SESSIONS_DIR / f'{sid}.json').write_text(json.dumps(data, indent=2, ensure_ascii=False))
     # Update index
     sessions = load_sessions()
@@ -268,6 +267,14 @@ class Api:
     def delete_session(self, sid):
         delete_session(sid)
         return json.dumps(load_sessions())
+
+    def save_chat(self, sid, chat_json):
+        p = SESSIONS_DIR / f'{sid}.json'
+        if p.exists():
+            data = json.loads(p.read_text())
+            data['chat'] = json.loads(chat_json)
+            p.write_text(json.dumps(data, indent=2, ensure_ascii=False))
+        return 'ok'
 
     # ── File ──
     def pick_file(self):
