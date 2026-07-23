@@ -28,13 +28,19 @@ def auto_install():
     except: missing.append('PyMuPDF')
     try: import psutil
     except: missing.append('psutil')
-    if missing:
-        for dep in missing:
-            subprocess.run([sys.executable, '-m', 'pip', 'install', dep],
-                         capture_output=True, timeout=120)
+    # Only install if called — this function runs in background thread
+    if missing and threading.current_thread() is not threading.main_thread():
+        import subprocess as _sp
+        deps_str = ' '.join(missing)
+        _sp.run([sys.executable, '-m', 'pip', 'install', deps_str],
+               capture_output=True, timeout=300)
 
-auto_install()
-import webview
+try:
+    import webview
+except ImportError:
+    _pip = sys.executable.replace('python3', 'pip') or 'pip3'
+    subprocess.run([_pip, 'install', 'pywebview', 'pyobjc'], capture_output=True, timeout=120)
+    import webview
 from lighton_ocr import ensure_loaded, unload, is_loaded, ocr_image
 
 # ── Paths ──
@@ -252,7 +258,12 @@ if __name__ == '__main__':
     signal.signal(signal.SIGTERM, lambda *a: (unload(), sys.exit(0)))
     signal.signal(signal.SIGINT, lambda *a: (unload(), sys.exit(0)))
 
+    # Run auto-install in background — never block startup
+    threading.Thread(target=auto_install, daemon=True).start()
+
     api = Api()
+
+    # Don't load model on startup — user clicks ▶ Start or OCR button
 
     url = os.path.join(str(RESOURCES), 'index.html')
     if not os.path.exists(url):
