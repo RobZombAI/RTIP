@@ -122,6 +122,12 @@ header h1 span { color: var(--accent); }
 .btn-ghost:hover { border-color: var(--text2); }
 .btn-success { background: var(--success); color: #000; }
 
+/* OCR progress overlay */
+.ocr-progress { position: absolute; inset: 0; background: rgba(13,17,23,.9); z-index: 15; display: none; align-items: center; justify-content: center; border-radius: 8px; }
+.ocr-progress[style*="display: flex"], .ocr-progress[style*="display:block"] { display: flex !important; }
+.ocr-progress-inner { text-align: center; }
+.ocr-progress-label { color: var(--text); font-size: 14px; margin-top: 8px; }
+
 /* Result area */
 .result-area { flex: 1; overflow-y: auto; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; display: none; flex-direction: column; }
 .result-area.visible { display: flex; }
@@ -209,7 +215,14 @@ footer { text-align: center; padding: 4px; font-size: 9px; color: var(--text2); 
 
 <!-- ═══ OCR Panel ═══ -->
 <div class="panel active" id="panel-ocr">
-  <div class="panel-overlay" id="ocrLoading"><div class="spinner"></div><div class="label">Loading OCR model…</div></div>
+<div class="panel-overlay" id="ocrLoading"><div class="spinner"></div><div class="label">Loading OCR model…</div></div>
+<div class="ocr-progress" id="ocrProgress" style="display:none">
+  <div class="ocr-progress-inner">
+    <div class="spinner" style="width:32px;height:32px;border-width:4px"></div>
+    <div class="ocr-progress-label" id="ocrProgressLabel">OCR in progress…</div>
+    <button class="btn" id="ocrCancelBtn" onclick="cancelOcr()" style="background:var(--error);color:#fff;margin-top:6px">⏹ Cancel</button>
+  </div>
+</div>
   <div class="error-banner" id="ocrError"></div>
   <div class="drop-zone" id="ocrDropZone">
     <div id="ocrDropContent">

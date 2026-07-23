@@ -123,6 +123,8 @@ async function ocrRun() {
   isProcessing = true;
   const btn = document.getElementById('ocrBtn');
   btn.textContent = '⏳ OCR…'; btn.classList.add('loading');
+  document.getElementById('ocrProgress').style.display = 'flex';
+  document.getElementById('ocrProgressLabel').textContent = 'OCR in progress…';
   document.getElementById('ocrResults').classList.add('visible');
   document.getElementById('ocrResultBody').innerHTML = '<div class="loading-indicator"><div class="spinner"></div><div>OCR in progress…</div></div>';
   document.getElementById('ocrError').classList.remove('visible');
@@ -131,7 +133,20 @@ async function ocrRun() {
   catch (e) { showError(String(e)); isProcessing = false; }
 }
 
+function cancelOcr() {
+  document.getElementById('ocrProgressLabel').textContent = 'Cancelling…';
+  pywebview.api.cancel_ocr();
+  setTimeout(() => {
+    isProcessing = false;
+    document.getElementById('ocrProgress').style.display = 'none';
+    document.getElementById('ocrBtn').textContent = '🔍 OCR';
+    document.getElementById('ocrBtn').classList.remove('loading');
+    showError('Cancelled');
+  }, 500);
+}
+
 function showResult(data) {
+  document.getElementById('ocrProgress').style.display = 'none';
   lastOcrResult = data; isProcessing = false;
   document.getElementById('ocrBtn').textContent = '🔍 OCR'; document.getElementById('ocrBtn').classList.remove('loading');
   const body = document.getElementById('ocrResultBody'); body.innerHTML = '';
@@ -162,7 +177,7 @@ function ocrNav(d) {
 
 function ocrCopyAll() { copyText(lastOcrResult && lastOcrResult.raw); }
 function ocrOpenFolder() { if(lastOcrResult && lastOcrResult.save_path) pywebview.api.open_folder(lastOcrResult.save_path); }
-function showError(m) { isProcessing = false; document.getElementById('ocrBtn').textContent = '🔍 OCR'; document.getElementById('ocrBtn').classList.remove('loading'); document.getElementById('ocrError').textContent = '❌ ' + m; document.getElementById('ocrError').classList.add('visible'); }
+function showError(m) { isProcessing = false; document.getElementById('ocrProgress').style.display = 'none'; document.getElementById('ocrBtn').textContent = '🔍 OCR'; document.getElementById('ocrBtn').classList.remove('loading'); document.getElementById('ocrError').textContent = '❌ ' + m; document.getElementById('ocrError').classList.add('visible'); }
 
 // ═══════════════════════════════════════════
 //  Read Tab (LLM Chat)

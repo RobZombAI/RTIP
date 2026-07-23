@@ -56,6 +56,9 @@ LLM_MODEL = HOME / 'Downloads' / 'Agents-A1-Q8_0.gguf'
 OUTPUT_DIR = HOME / 'rtip-app' / 'output'
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
+# ── OCR cancel flag ──
+ocr_cancel = threading.Event()
+
 LLAMA_SERVER = shutil.which('llama-server') or '/opt/homebrew/bin/llama-server'
 LLM_PORT = 8081
 LLM_URL = f'http://127.0.0.1:{LLM_PORT}'
@@ -135,7 +138,10 @@ def push_models_status(api):
 # ═══════════════════════════════════════════
 
 def do_ocr(image_path, prompt="Extract all text from this document."):
-    return ocr_image(image_path, prompt)
+    if ocr_cancel.is_set(): return '[CANCELLED]'
+    result = ocr_image(image_path, prompt)
+    if ocr_cancel.is_set(): return '[CANCELLED]'
+    return result
 
 def ocr_pdf(pdf_path, prompt="Extract all text from this document.", dpi=200):
     try:
@@ -271,6 +277,8 @@ return POSIX path of theFile'''
         }
 
     def run_ocr(self, image_path, prompt):
+        global ocr_cancel
+        ocr_cancel.clear()
         def task():
             try:
                 self.window.evaluate_js('showLoading()')
@@ -282,20 +290,30 @@ return POSIX path of theFile'''
                 if ftype == 'pdf':
                     pd = ocr_pdf(image_path, prompt)
                     for p in pd:
+                        if ocr_cancel.is_set(): break
                         raw_text += f"\n=== PAGE {p['page']}/{p['total']} ===\n{p['text']}\n"
                         pages.append({'page': p['page'], 'total': p['total'],
                             'raw': p['text'], 'lines': [{'text': l} for l in p['text'].strip().split('\n') if l.strip()]})
                 else:
                     text = do_ocr(image_path, prompt)
+                    if ocr_cancel.is_set():
+                        self.window.evaluate_js(f'showError({json.dumps("OCR cancelled")})')
+                        return
                     raw_text = text
                     pages = [{'page': 1, 'total': 1, 'raw': text,
                         'lines': [{'text': l} for l in text.strip().split('\n') if l.strip()]}]
-                save_path = save_output(image_path, raw_text)
-                self.window.evaluate_js(f'showResult({json.dumps({"type":ftype,"raw":raw_text,"pages":pages,"save_path":save_path,"image":image_path})})')
+                if not ocr_cancel.is_set():
+                    save_path = save_output(image_path, raw_text)
+                    self.window.evaluate_js(f'showResult({json.dumps({"type":ftype,"raw":raw_text,"pages":pages,"save_path":save_path,"image":image_path})})')
             except Exception as e:
                 import traceback; traceback.print_exc()
                 self.window.evaluate_js(f'showError({json.dumps(str(e))})')
         threading.Thread(target=task, daemon=True).start()
+
+    def cancel_ocr(self):
+        global ocr_cancel
+        ocr_cancel.set()
+        return 'cancelled'
 
     def llm_send(self, message, history_json):
         def task():
