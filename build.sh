@@ -67,11 +67,13 @@ echo "APPL????" > "$APP/Contents/PkgInfo"
 
 # Source files
 cp "$SOURCES/main.py" "$APP/Contents/Resources/main.py"
+cp "$SOURCES/lighton_ocr.py" "$APP/Contents/Resources/lighton_ocr.py"
 cp "$SOURCES/resources/index.html" "$APP/Contents/Resources/index.html"
 cp "$SOURCES/resources/api.js" "$APP/Contents/Resources/api.js"
 
 # Validate
 python3 -c "import ast; ast.parse(open('$APP/Contents/Resources/main.py').read()); print('✅ main.py OK')"
+python3 -c "import ast; ast.parse(open('$APP/Contents/Resources/lighton_ocr.py').read()); print('✅ lighton_ocr.py OK')"
 echo "✅ Built: $(wc -c < $APP/Contents/Resources/api.js) bytes JS · $(wc -c < $APP/Contents/Resources/index.html) bytes HTML"
 
 # Install
