@@ -1,53 +1,62 @@
 // ═══════════════════════════════════════════
-//  RTIP OCR — LightOnOCR-2-1B
+//  RTIP — Image OCR + PDF Reader
 // ═══════════════════════════════════════════
 
 let selectedPath = null;
 let isProcessing = false;
-let lastResult = null;
-let pages = [];
+let currentType = null; // 'image' or 'pdf'
+let currentPages = [];
 let currentPage = 0;
-let viewAllMode = false;
+let currentFullText = '';
+let currentSavePath = '';
+let chatHistory = [];
 
 document.addEventListener('DOMContentLoaded', () => {
-  if (typeof pywebview !== 'undefined') pollModel();
+  if (typeof pywebview !== 'undefined') pollStatus();
 });
 
-// ═══ Model ──
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+// ═══ Status ──
+async function pollStatus() {
+  try {
+    const s = await pywebview.api.get_status();
+    updateStatus(s);
+  } catch(_) {}
+  setTimeout(pollStatus, 3000);
+}
 
 function updateStatus(s) {
-  const dot = document.getElementById('modelDot');
-  const label = document.getElementById('modelLabel');
-  if (s.loaded) {
-    dot.className = 'status-dot loaded'; label.textContent = 'loaded';
-    document.getElementById('startBtn').style.display = 'none';
-    document.getElementById('stopBtn').style.display = '';
-  } else if (s.loading) {
-    dot.className = 'status-dot loading'; label.textContent = 'loading…';
-    document.getElementById('startBtn').style.display = 'none';
-    document.getElementById('stopBtn').style.display = 'none';
+  if (s.ocr) { setModel('ocr', 'on'); }
+  else if (s.ocr === 'loading') { setModel('ocr', 'loading'); }
+  else { setModel('ocr', 'off'); }
+  setModel('llm', s.llm ? 'on' : 'off');
+}
+
+function setModel(m, state) {
+  const dot = document.getElementById(m + 'Dot');
+  dot.className = 'status-dot ' + state;
+  if (state === 'on') {
+    document.getElementById(m + 'Start').style.display = 'none';
+    document.getElementById(m + 'Stop').style.display = '';
   } else {
-    dot.className = 'status-dot unloaded'; label.textContent = 'unloaded';
-    document.getElementById('startBtn').style.display = '';
-    document.getElementById('stopBtn').style.display = 'none';
+    document.getElementById(m + 'Start').style.display = '';
+    document.getElementById(m + 'Stop').style.display = 'none';
   }
 }
 
-async function startModel() {
-  document.getElementById('modelDot').className = 'status-dot loading';
-  document.getElementById('modelLabel').textContent = 'loading…';
-  try { await pywebview.api.start_model(); } catch(e) { console.error(e); }
+async function startModel(m) {
+  document.getElementById(m + 'Dot').className = 'status-dot loading';
+  if (m === 'ocr') await pywebview.api.start_ocr();
+  else await pywebview.api.start_llm();
 }
 
-async function stopModel() {
-  try { await pywebview.api.stop_model(); } catch(e) { console.error(e); }
+async function stopModel(m) {
+  if (m === 'ocr') await pywebview.api.stop_ocr();
+  else await pywebview.api.stop_llm();
 }
 
-async function pollModel() {
-  try { const s = await pywebview.api.get_status(); updateStatus({loaded: s.loaded}); } catch(_) {}
-}
-
-// ═══ File picker ──
+// ═══ File selection ──
 
 document.getElementById('dropZone').addEventListener('click', async () => {
   try {
@@ -57,172 +66,213 @@ document.getElementById('dropZone').addEventListener('click', async () => {
 });
 
 async function selectFile(path) {
-  selectedPath = path;
-  pages = []; currentPage = 0; viewAllMode = false;
+  selectedPath = path; currentPage = 0; currentPages = [];
+  currentType = null; currentFullText = '';
   document.getElementById('pageNav').style.display = 'none';
-  document.getElementById('ocrBtn').disabled = false;
+  document.getElementById('analyzeBtn').style.display = 'none';
+  document.getElementById('chatSection').classList.remove('visible');
   document.getElementById('saveToast').classList.remove('visible');
+  document.getElementById('actionBar').style.display = '';
+  document.getElementById('infoBox').classList.remove('visible');
+
   const info = await pywebview.api.file_info(path);
+  currentType = info.type;
+
   document.getElementById('dropContent').style.display = 'none';
-  document.getElementById('thumbWrap').style.display = '';
-  document.getElementById('fileMeta').style.display = '';
+  document.getElementById('filePreview').style.display = 'flex';
   document.getElementById('fileName').textContent = info.name;
   document.getElementById('fileSize').textContent = info.size_str;
+
   const badge = document.getElementById('fileBadge');
   badge.textContent = info.type.toUpperCase();
-  badge.className = 'file-badge ' + (info.type === 'pdf' ? 'badge-pdf' : 'badge-image');
+  badge.className = 'file-badge badge-' + info.type;
+
   const img = document.getElementById('previewImg');
   if (info.type === 'image') {
     const b64 = await pywebview.api.read_file_b64(path);
-    img.src = 'data:image/png;base64,' + b64; img.style.display = '';
-    document.getElementById('modalPreviewImg').src = img.src;
-    img.onclick = (ev) => { ev.stopPropagation(); document.getElementById('imagePreview').classList.add('visible'); };
+    img.src = 'data:image/png;base64,' + b64;
+    img.style.display = '';
   } else { img.style.display = 'none'; }
+
   document.getElementById('dropZone').classList.add('has-file');
+
+  // Configure action bar
+  const box = document.getElementById('infoBox');
+  if (info.type === 'pdf') {
+    box.className = 'info-box visible info-pdf';
+    box.innerHTML = '📄 PDF: text extraction + optional AI analysis';
+    const btn = document.getElementById('actionBtn');
+    btn.textContent = '📝 Extract text';
+    btn.disabled = false;
+    btn.onclick = extractPdf;
+  } else {
+    box.className = 'info-box visible info-image';
+    box.innerHTML = '🖼️ Image: OCR text extraction';
+    const btn = document.getElementById('actionBtn');
+    btn.textContent = '🔍 OCR';
+    btn.disabled = false;
+    btn.onclick = runOcr;
+  }
 }
 
-// ═══ OCR ──
+// ═══ PDF text extraction ──
 
-document.getElementById('ocrBtn').addEventListener('click', runOcr);
-document.getElementById('promptInput').addEventListener('keydown', (e) => { if (e.key === 'Enter' && selectedPath) runOcr(); });
+async function extractPdf() {
+  if (!selectedPath || isProcessing) return;
+  isProcessing = true;
+  showProgress('Extracting text from PDF…');
+  document.getElementById('resultArea').classList.add('visible');
+  document.getElementById('resultBody').innerHTML = '<div class="loading-indicator"><div class="spinner"></div><div>Extracting…</div></div>';
+  hideError();
+  try { await pywebview.api.extract_pdf_text(selectedPath); }
+  catch (e) { showError(e); isProcessing = false; }
+}
+
+// ═══ Image OCR ──
 
 async function runOcr() {
   if (!selectedPath || isProcessing) return;
   isProcessing = true;
-  pages = []; currentPage = 0; viewAllMode = false;
-  document.getElementById('pageNav').style.display = 'none';
-  const btn = document.getElementById('ocrBtn');
-  btn.textContent = '⏳ OCR…'; btn.classList.add('loading');
-  document.getElementById('ocrProgress').classList.add('visible');
-  document.getElementById('ocrProgressLabel').textContent = 'Starting…';
-  document.getElementById('ocrProgressDetail').textContent = '';
+  showProgress('OCR in progress…');
   document.getElementById('resultArea').classList.add('visible');
   document.getElementById('resultBody').innerHTML = '<div class="loading-indicator"><div class="spinner"></div><div>OCR in progress…</div></div>';
-  document.getElementById('errorBanner').classList.remove('visible');
-  document.getElementById('saveToast').classList.remove('visible');
-  try { await pywebview.api.run_ocr(selectedPath, document.getElementById('promptInput').value); }
-  catch (e) { showError(String(e)); isProcessing = false; }
+  hideError();
+  try { await pywebview.api.run_ocr(selectedPath, document.getElementById('promptInput').value || 'Extract all text from this document.'); }
+  catch (e) { showError(e); isProcessing = false; }
 }
 
-function showLoading() {
-  document.getElementById('ocrProgress').classList.add('visible');
-  document.getElementById('ocrProgressLabel').textContent = 'Processing…';
-}
+function showLoading() { showProgress('Processing…'); }
 
 function streamPage(data) {
-  // Store page
-  pages[data.page - 1] = data.text;
-  currentPage = 0;
-  viewAllMode = false;
-  document.getElementById('ocrProgressLabel').textContent = 'Page ' + data.page + '/' + data.total + '…';
-  document.getElementById('ocrProgressDetail').textContent = (data.text.length || '0') + ' chars extracted';
-
+  currentPages[data.page - 1] = data.text;
+  document.getElementById('progressLabel').textContent = 'Page ' + data.page + '/' + data.total + '…';
+  document.getElementById('progressDetail').textContent = data.text.length + ' chars';
   const body = document.getElementById('resultBody');
-  if (body.children.length === 1 && body.children[0].className === 'loading-indicator') {
-    body.innerHTML = '';
-  }
-
-  // Show live preview of latest page
-  const pre = document.createElement('pre');
-  pre.textContent = '📄 Page ' + data.page + '/' + data.total + '\n' + data.text.slice(0, 500);
-  if (data.text.length > 500) pre.textContent += '\n…';
-  body.appendChild(pre);
+  if (body.children.length === 1 && body.children[0].className === 'loading-indicator') body.innerHTML = '';
+  const d = document.createElement('div');
+  d.style.cssText = 'padding:4px 8px;margin:2px 0;background:var(--surface2);border-radius:4px;font-size:12px;color:var(--success);';
+  d.textContent = '📄 Page ' + data.page + '/' + data.total + ' ✓ (' + data.text.length + ' chars)';
+  body.appendChild(d);
   body.scrollTop = body.scrollHeight;
-
-  updateRamMeter();
-}
-
-function updateRamMeter() {
-  const el = document.getElementById('ramMeter');
-  const usedPages = pages.filter(p => p !== undefined).length;
-  if (usedPages > 0) {
-    el.textContent = '📄 ' + usedPages + ' pages · ' + (lastResult ? (lastResult.match(/\n/g) || []).length + ' lines' : '');
-  }
 }
 
 function showResult(data) {
-  document.getElementById('ocrProgress').classList.remove('visible');
-  lastResult = data.raw; isProcessing = false;
+  hideProgress(); isProcessing = false;
+  currentFullText = data.raw;
+  currentSavePath = data.save_path;
+  currentPage = 0;
 
-  // Parse pages from raw text
-  if (data.raw.includes('=== PAGE')) {
-    const parts = data.raw.split(/=== PAGE \d+\/\d+ ===/);
-    pages = parts.filter(p => p.trim()).map(p => p.trim());
-    currentPage = 0;
-    showPage(0);
-    document.getElementById('pageNav').style.display = '';
-    document.getElementById('pageTotal').textContent = pages.length;
-    document.getElementById('pageInput').value = 1;
-    document.getElementById('resultTitle').textContent = '📄 PDF OCR (' + pages.length + ' pages)';
+  // Parse pages
+  if (data.type === 'pdf' && data.pages) {
+    currentPages = data.pages.map(p => p.text);
   } else {
-    pages = [data.raw];
-    currentPage = 0;
-    showPage(0);
-    document.getElementById('pageNav').style.display = 'none';
-    document.getElementById('resultTitle').textContent = '🖼️ Image OCR';
+    currentPages = [data.raw];
   }
 
-  document.getElementById('ocrBtn').textContent = '🔍 OCR';
-  document.getElementById('ocrBtn').classList.remove('loading');
+  showPage(0);
   document.getElementById('savePath').textContent = data.save_path;
   document.getElementById('saveToast').classList.add('visible');
-  updateRamMeter();
-}
 
-// ═══ Page navigation ──
+  if (currentPages.length > 1) {
+    document.getElementById('pageNav').style.display = '';
+    document.getElementById('pageTotal').textContent = currentPages.length;
+    document.getElementById('analyzeBtn').style.display = '';
+  } else {
+    document.getElementById('pageNav').style.display = 'none';
+    document.getElementById('analyzeBtn').style.display = currentType === 'pdf' ? '' : 'none';
+  }
+  document.getElementById('resultTitle').textContent = data.type === 'pdf' ? '📄 PDF Text' : '🖼️ OCR Result';
+  document.getElementById('actionBar').style.display = 'none';
+}
 
 function showPage(idx) {
-  viewAllMode = false;
-  currentPage = Math.max(0, Math.min(idx, pages.length - 1));
+  currentPage = Math.max(0, Math.min(idx, currentPages.length - 1));
   const body = document.getElementById('resultBody');
   body.innerHTML = '';
   const pre = document.createElement('pre');
-  pre.textContent = pages[currentPage] || '[empty]';
+  pre.textContent = currentPages[currentPage] || '[empty]';
   body.appendChild(pre);
-  document.getElementById('pageInput').value = currentPage + 1;
-  document.getElementById('prevPageBtn').disabled = currentPage === 0;
-  document.getElementById('nextPageBtn').disabled = currentPage === pages.length - 1;
+  document.getElementById('pageNum').textContent = currentPage + 1;
+  if (document.getElementById('prevPg')) document.getElementById('prevPg').disabled = currentPage === 0;
+  if (document.getElementById('nextPg')) document.getElementById('nextPg').disabled = currentPage === currentPages.length - 1;
 }
 
-function nextPage() { if (currentPage < pages.length - 1) showPage(currentPage + 1); }
+function nextPage() { if (currentPage < currentPages.length - 1) showPage(currentPage + 1); }
 function prevPage() { if (currentPage > 0) showPage(currentPage - 1); }
-function goToPage(n) { if (n >= 1 && n <= pages.length) showPage(n - 1); }
 
-function viewAll() {
-  viewAllMode = true;
-  const body = document.getElementById('resultBody');
-  body.innerHTML = '';
-  const pre = document.createElement('pre');
-  pre.textContent = lastResult;
-  body.appendChild(pre);
+// ═══ Analyze with LLM ──
+
+function openAnalyze() {
+  document.getElementById('chatSection').classList.add('visible');
+  document.getElementById('chatMessages').innerHTML = '<div class="chat-msg system">🤖 Agents A1 ready. Ask about this document.</div>';
+  document.getElementById('analyzeBtn').style.display = 'none';
+}
+
+async function chatSend() {
+  const inp = document.getElementById('chatInput');
+  const msg = inp.value.trim();
+  if (!msg) return;
+  inp.value = '';
+  addChat('user', msg);
+  addChat('assistant', '<span class="loading-dots">Thinking</span>');
+
+  const pageText = currentPages[currentPage] || '';
+  try {
+    await pywebview.api.llm_analyze(pageText, msg);
+  } catch(e) {
+    removeLastChat();
+    addChat('assistant', '❌ Error: ' + e);
+  }
+}
+
+function llmResponse(t) { removeLastChat(); addChat('assistant', t); }
+function llmError(m) { removeLastChat(); addChat('assistant', '❌ ' + m); }
+
+function addChat(role, text) {
+  const d = document.createElement('div');
+  d.className = 'chat-msg ' + role;
+  d.innerHTML = text;
+  document.getElementById('chatMessages').appendChild(d);
+  document.getElementById('chatMessages').scrollTop = document.getElementById('chatMessages').scrollHeight;
+}
+
+function removeLastChat() {
+  const m = document.getElementById('chatMessages');
+  if (m.lastChild && m.lastChild.innerHTML.includes('loading-dots')) m.removeChild(m.lastChild);
 }
 
 // ═══ Cancel ──
 
-function cancelOcr() {
-  document.getElementById('ocrProgressLabel').textContent = 'Cancelling…';
-  pywebview.api.cancel_ocr();
-  setTimeout(() => {
-    isProcessing = false;
-    document.getElementById('ocrProgress').classList.remove('visible');
-    document.getElementById('ocrBtn').textContent = '🔍 OCR';
-    document.getElementById('ocrBtn').classList.remove('loading');
-    showError('Cancelled');
-    startModel();
-  }, 800);
+function cancelCurrent() {
+  if (currentType === 'image') {
+    pywebview.api.cancel_ocr();
+  }
+  hideProgress(); isProcessing = false;
+  showError('Cancelled');
+}
+
+// ═══ Progress ──
+
+function showProgress(label) {
+  document.getElementById('progressOverlay').classList.add('visible');
+  document.getElementById('progressLabel').textContent = label;
+  document.getElementById('progressDetail').textContent = '';
+}
+
+function hideProgress() {
+  document.getElementById('progressOverlay').classList.remove('visible');
 }
 
 // ═══ Utils ──
 
 function showError(m) {
-  isProcessing = false; document.getElementById('ocrProgress').classList.remove('visible');
-  document.getElementById('ocrBtn').textContent = '🔍 OCR'; document.getElementById('ocrBtn').classList.remove('loading');
+  hideProgress(); isProcessing = false;
   document.getElementById('errorBanner').textContent = '❌ ' + m;
   document.getElementById('errorBanner').classList.add('visible');
 }
+function hideError() { document.getElementById('errorBanner').classList.remove('visible'); }
 
-function copyAll() {
-  const text = viewAllMode || pages.length <= 1 ? lastResult : pages[currentPage];
+function copyText(text) {
   if (!text) return;
   if (navigator.clipboard?.writeText) { navigator.clipboard.writeText(text).then(showCopy); }
   else {
@@ -232,7 +282,7 @@ function copyAll() {
   }
 }
 
-function openFolder() { if (document.getElementById('savePath').textContent) pywebview.api.open_folder(document.getElementById('savePath').textContent); }
+function openFolder() { if (currentSavePath) pywebview.api.open_folder(currentSavePath); }
 
 function showCopy() {
   const el = document.getElementById('copyToast');

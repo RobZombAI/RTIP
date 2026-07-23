@@ -1,47 +1,42 @@
 #!/usr/bin/env python3
 """
-RTIP — OCR-only. LightOnOCR-2-1B (PyTorch/MPS).
-Fast, clean, local OCR for images and PDFs.
+RTIP — Image OCR (LightOnOCR) + PDF Reader (Agents A1)
+Images → LightOnOCR-2-1B
+PDFs → PyMuPDF text extraction + optional Agents A1 analysis
 """
-import sys, os, json, time, subprocess, threading, signal, atexit, base64
+import sys, os, json, time, subprocess, threading, signal, atexit, base64, urllib.request
 from pathlib import Path
 from datetime import datetime
 
 os.environ['TOKENIZERS_PARALLELISM'] = 'false'
 
-# ── Auto-install ──
+# ── Auto-install (background only) ──
 def auto_install():
     missing = []
-    try: import webview
-    except: missing.append('pywebview pyobjc')
-    try: import torch
-    except: missing.append('torch')
-    try:
-        import transformers
-        from transformers import LightOnOcrForConditionalGeneration
-    except: missing.append('transformers>=5.0.0')
-    try: from PIL import Image
-    except: missing.append('pillow')
-    try: import torchvision
-    except: missing.append('torchvision')
-    try: import fitz
-    except: missing.append('PyMuPDF')
-    try: import psutil
-    except: missing.append('psutil')
-    # Only install if called — this function runs in background thread
+    for mod, pkg in [(('webview',), 'pywebview pyobjc'),
+                     (('torch',), 'torch'),
+                     (('transformers',), 'transformers>=5.0.0'),
+                     (('PIL',), 'pillow'),
+                     (('torchvision',), 'torchvision'),
+                     (('fitz',), 'PyMuPDF'),
+                     (('psutil',), 'psutil')]:
+        try:
+            __import__(mod[0])
+        except:
+            missing.append(pkg)
     if missing and threading.current_thread() is not threading.main_thread():
-        import subprocess as _sp
-        deps_str = ' '.join(missing)
-        _sp.run([sys.executable, '-m', 'pip', 'install', deps_str],
-               capture_output=True, timeout=300)
+        subprocess.run([sys.executable, '-m', 'pip', 'install', *missing],
+                      capture_output=True, timeout=300)
 
 try:
     import webview
 except ImportError:
-    _pip = sys.executable.replace('python3', 'pip') or 'pip3'
-    subprocess.run([_pip, 'install', 'pywebview', 'pyobjc'], capture_output=True, timeout=120)
+    subprocess.run([sys.executable, '-m', 'pip', 'install', 'pywebview', 'pyobjc'],
+                  capture_output=True, timeout=120)
     import webview
-from lighton_ocr import ensure_loaded, unload, is_loaded, ocr_image
+
+import fitz  # PyMuPDF — always available for PDF text extraction
+from lighton_ocr import ensure_loaded, unload as ocr_unload, is_loaded, ocr_image
 
 # ── Paths ──
 APP_DIR = Path(__file__).parent.resolve()
@@ -52,105 +47,72 @@ OUTPUT_DIR = Path.home() / 'rtip-ocr' / 'output'
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 ocr_cancel = threading.Event()
-MAX_RAM_PCT = 85  # never exceed 85% of total RAM
+LLM_MODEL = Path.home() / 'Downloads' / 'Agents-A1-Q8_0.gguf'
+llm_process = None
 
-def get_ram_info():
-    """Return (used_pct, available_gb, total_gb). Returns (0,0,0) if psutil missing."""
-    try:
-        import psutil
-        mem = psutil.virtual_memory()
-        return (mem.percent, round(mem.available / 1073741824, 1), round(mem.total / 1073741824, 1))
-    except:
-        return (0, 0, 0)
-
-def ram_safe_dpi(requested_dpi=150):
-    """Auto-reduce DPI if RAM is high. Returns safe DPI value."""
-    pct, avail, total = get_ram_info()
-    if pct > MAX_RAM_PCT:
-        # Scale down proportionally: at 95% → use half the DPI
-        factor = max(0.3, (MAX_RAM_PCT - 5) / max(pct, 1))
-        reduced = int(requested_dpi * factor)
-        return max(reduced, 72)  # minimum 72 DPI
-    return requested_dpi
-
-def do_ocr(image_path, prompt="Extract all text from this document."):
-    if ocr_cancel.is_set(): return '[CANCELLED]'
-    # Run with a timeout wrapper — if it hangs, we skip
-    result = ocr_image(image_path, prompt)
-    if ocr_cancel.is_set(): return '[CANCELLED]'
-    return result
-
-def ocr_pdf(pdf_path, prompt="Extract all text from this document.", dpi=150, page_callback=None):
-    """Process PDF pages one by one, adapting quality to available RAM."""
-    try:
-        import fitz
-    except ImportError:
-        return _ocr_pdf_fallback(pdf_path, prompt, dpi)
-    doc = fitz.open(pdf_path)
-    pages = []
-    total_pages = doc.page_count
-    current_dpi = dpi
-
-    for i, page in enumerate(doc):
-        if ocr_cancel.is_set(): break
-
-        # Adapt DPI to available RAM before each page
-        current_dpi = ram_safe_dpi(dpi)
-        mat = fitz.Matrix(current_dpi / 72, current_dpi / 72)
+# ── LLM (Agents A1) ──
+def start_llm():
+    global llm_process
+    if llm_process and llm_process.poll() is None:
+        return True
+    if not LLM_MODEL.exists():
+        return False
+    ls = shutil.which('llama-server') or '/opt/homebrew/bin/llama-server'
+    cmd = [ls, '--model', str(LLM_MODEL), '--host', '127.0.0.1', '--port', '8081',
+           '--temp', '0.1', '--ctx-size', '32768', '-ngl', '99',
+           '--parallel', '1', '--cont-batching', '--mlock']
+    proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    import urllib.request
+    for _ in range(90):
+        time.sleep(1)
         try:
-            pix = page.get_pixmap(matrix=mat)
-        except:
-            continue  # skip corrupted pages
-
-        tmp = os.path.join(OUTPUT_DIR, f'_tmp_page_{i}.png')
-        pix.save(tmp)
-        pix = None  # free immediately
-        del mat
-
-        text = do_ocr(tmp, prompt)
-        try: os.remove(tmp)
+            urllib.request.urlopen('http://127.0.0.1:8081/health', timeout=2)
+            llm_process = proc
+            return True
         except: pass
+    return False
 
-        if ocr_cancel.is_set(): break
+def stop_llm():
+    global llm_process
+    if llm_process:
+        llm_process.terminate()
+        try: llm_process.wait(timeout=5)
+        except: llm_process.kill()
+        llm_process = None
 
-        pages.append({'page': i + 1, 'total': total_pages, 'text': text})
-        if page_callback:
-            page_callback(i + 1, total_pages, text)
+def llm_ask(system, text, question):
+    """Query Agents A1 with text context."""
+    payload = {
+        'messages': [
+            {'role': 'system', 'content': system},
+            {'role': 'user', 'content': f'# Document\n{text[:60000]}\n\n# Question\n{question}'}
+        ],
+        'temperature': 0.1, 'max_tokens': 2048, 'stream': False,
+    }
+    req = urllib.request.Request('http://127.0.0.1:8081/v1/chat/completions',
+        data=json.dumps(payload).encode(), headers={'Content-Type': 'application/json'})
+    resp = urllib.request.urlopen(req, timeout=300)
+    return json.loads(resp.read())['choices'][0]['message']['content']
 
-        import gc; gc.collect()
-
-    doc.close()
-    return pages
-
-def _ocr_pdf_fallback(pdf_path, prompt, dpi=150):
-    import tempfile
-    tmpdir = tempfile.mkdtemp(prefix='ocr_pdf_')
-    subprocess.run(['sips', '-s', 'format', 'png', '--resampleWidth', str(8.5 * dpi),
-        pdf_path, '--out', tmpdir], capture_output=True, timeout=60)
-    pages = []
-    for fname in sorted(os.listdir(tmpdir)):
-        if ocr_cancel.is_set(): break
-        if fname.endswith('.png'):
-            text = do_ocr(os.path.join(tmpdir, fname), prompt)
-            pages.append({'page': len(pages) + 1, 'total': len(os.listdir(tmpdir)), 'text': text})
-            os.remove(os.path.join(tmpdir, fname))
-    os.rmdir(tmpdir)
-    return pages
+# ── OCR (images only) ──
+def do_ocr(image_path, prompt="Extract all text from this image."):
+    if ocr_cancel.is_set(): return '[CANCELLED]'
+    r = ocr_image(image_path, prompt)
+    if ocr_cancel.is_set(): return '[CANCELLED]'
+    return r
 
 def detect_file_type(path):
-    ext = os.path.splitext(path)[1].lower()
-    if ext == '.pdf': return 'pdf'
-    if ext in ('.png','.jpg','.jpeg','.gif','.webp','.bmp','.tiff','.tif'): return 'image'
+    e = os.path.splitext(path)[1].lower()
+    if e == '.pdf': return 'pdf'
+    if e in ('.png','.jpg','.jpeg','.gif','.webp','.bmp','.tiff','.tif'): return 'image'
     return 'unknown'
 
 def save_output(path, text):
     ts = datetime.now().strftime('%Y%m%d_%H%M%S')
     n = os.path.splitext(os.path.basename(path))[0]
-    save_path = OUTPUT_DIR / f'{ts}_{n}.txt'
-    with open(save_path, 'w', encoding='utf-8') as f:
-        f.write(text)
-    return str(save_path)
-
+    p = OUTPUT_DIR / f'{ts}_{n}.txt'
+    with open(p, 'w', encoding='utf-8') as f: f.write(text)
+    return str(p)
 
 # ═══════════════════════════════════════════
 #  API
@@ -161,33 +123,49 @@ class Api:
         self.window = None
 
     def ping(self): return 'pong'
-    def get_status(self):
-        return {'loaded': is_loaded()}
 
-    def start_model(self):
+    def get_status(self):
+        import urllib.request
+        llm_alive = False
+        try:
+            urllib.request.urlopen('http://127.0.0.1:8081/health', timeout=2)
+            llm_alive = True
+        except: pass
+        return {'ocr': is_loaded(), 'llm': llm_alive, 'llm_model': LLM_MODEL.exists()}
+
+    def start_ocr(self):
         def task():
             ok = ensure_loaded()
-            self.push({'loaded': ok})
+            if self.window:
+                self.window.evaluate_js(f"updateStatus({json.dumps({'ocr': ok})})")
         threading.Thread(target=task, daemon=True).start()
-        self.push({'loading': True})
-        return 'starting'
-
-    def stop_model(self):
-        unload()
-        self.push({'loaded': False})
-        return 'stopped'
-
-    def push(self, state):
         if self.window:
-            try: self.window.evaluate_js(f"updateStatus({json.dumps(state)})")
-            except: pass
+            self.window.evaluate_js("updateStatus({'ocr': 'loading'})")
+
+    def stop_ocr(self):
+        ocr_unload()
+        if self.window:
+            self.window.evaluate_js("updateStatus({'ocr': False})")
+
+    def start_llm(self):
+        def task():
+            ok = start_llm()
+            if self.window:
+                self.window.evaluate_js(f"updateStatus({json.dumps({'llm': ok})})")
+        threading.Thread(target=task, daemon=True).start()
+
+    def stop_llm(self):
+        stop_llm()
+        if self.window:
+            self.window.evaluate_js("updateStatus({'llm': False})")
 
     def pick_file(self):
-        script = '''set f to choose file with prompt "Select image or PDF" of type {"public.png","public.jpeg","com.adobe.pdf"} default location (path to desktop)
+        s = '''set f to choose file with prompt "Select image or PDF" of type {"public.png","public.jpeg","com.adobe.pdf"} default location (path to desktop)
 return POSIX path of f'''
-        try: r = subprocess.check_output(['osascript', '-e', script]).decode().strip()
+        try:
+            r = subprocess.check_output(['osascript', '-e', s]).decode().strip()
+            return r or None
         except: return None
-        return r if r else None
 
     def read_file_b64(self, path):
         try:
@@ -205,78 +183,103 @@ return POSIX path of f'''
             'name': os.path.basename(path),
         }
 
+    def extract_pdf_text(self, pdf_path):
+        """Extract text directly from PDF using PyMuPDF. Fast, no model needed."""
+        def task():
+            try:
+                doc = fitz.open(pdf_path)
+                pages = []
+                for i, page in enumerate(doc):
+                    text = page.get_text()
+                    pages.append({'page': i + 1, 'total': doc.page_count, 'text': text})
+                    if self.window:
+                        try:
+                            self.window.evaluate_js(
+                                f"streamPage({json.dumps({'page':i+1,'total':doc.page_count,'text':text[:200]})})")
+                        except: pass
+                doc.close()
+                full = '\n'.join([f"=== PAGE {p['page']}/{p['total']} ===\n{p['text']}" for p in pages])
+                sp = save_output(pdf_path, full)
+                if self.window:
+                    self.window.evaluate_js(f"showResult({json.dumps({'raw':full,'pages':pages,'save_path':sp,'type':'pdf'})})")
+            except Exception as e:
+                import traceback; traceback.print_exc()
+                if self.window:
+                    self.window.evaluate_js(f"showError({json.dumps(str(e))})")
+        threading.Thread(target=task, daemon=True).start()
+
     def run_ocr(self, image_path, prompt):
+        """OCR for images only."""
         global ocr_cancel
         ocr_cancel.clear()
         def task():
             try:
-                self.window.evaluate_js('showLoading()')
+                if self.window: self.window.evaluate_js('showLoading()')
                 if not ensure_loaded():
-                    self.window.evaluate_js("showError('OCR model not available')")
+                    if self.window: self.window.evaluate_js("showError('OCR model not available')")
                     return
-                ftype = detect_file_type(image_path)
-                raw_text = ""
-                if ftype == 'pdf':
-                    def on_page(num, total, text):
-                        if self.window:
-                            try:
-                                self.window.evaluate_js(
-                                    f"streamPage({json.dumps({'page':num,'total':total,'text':text[:200]})})")
-                            except: pass
-                    for p in ocr_pdf(image_path, prompt, page_callback=on_page):
-                        if ocr_cancel.is_set(): break
-                        raw_text += f"\n=== PAGE {p['page']}/{p['total']} ===\n{p['text']}\n"
-                else:
-                    raw_text = do_ocr(image_path, prompt)
+                text = do_ocr(image_path, prompt)
                 if ocr_cancel.is_set():
-                    self.window.evaluate_js("showError('Cancelled')")
+                    if self.window: self.window.evaluate_js("showError('Cancelled')")
                 else:
-                    sp = save_output(image_path, raw_text)
-                    self.window.evaluate_js(f"showResult({json.dumps({'raw':raw_text,'save_path':sp,'type':ftype})})")
+                    sp = save_output(image_path, text)
+                    if self.window:
+                        self.window.evaluate_js(f"showResult({json.dumps({'raw':text,'save_path':sp,'type':'image'})})")
             except Exception as e:
                 import traceback; traceback.print_exc()
-                self.window.evaluate_js(f"showError({json.dumps(str(e))})")
+                if self.window: self.window.evaluate_js(f"showError({json.dumps(str(e))})")
         threading.Thread(target=task, daemon=True).start()
 
     def cancel_ocr(self):
-        global ocr_cancel
         ocr_cancel.set()
-        # Force-unload model to stop any stuck inference
-        unload()
-        return 'cancelled'
+        ocr_unload()
 
+    def llm_analyze(self, text, question):
+        """Analyze text with Agents A1."""
+        def task():
+            try:
+                if not start_llm():
+                    if self.window: self.window.evaluate_js("llmError('LLM not available')")
+                    return
+                resp = llm_ask(
+                    "You are RTIP Reading Assistant. Analyze the provided document text thoroughly.",
+                    text, question
+                )
+                if self.window: self.window.evaluate_js(f"llmResponse({json.dumps(resp)})")
+            except Exception as e:
+                import traceback; traceback.print_exc()
+                if self.window: self.window.evaluate_js(f"llmError({json.dumps(str(e))})")
+        threading.Thread(target=task, daemon=True).start()
 
 # ═══════════════════════════════════════════
 #  Main
 # ═══════════════════════════════════════════
 
 def on_shutdown():
-    unload()
+    ocr_unload()
+    stop_llm()
 
 if __name__ == '__main__':
+    import shutil, urllib
     atexit.register(on_shutdown)
-    signal.signal(signal.SIGTERM, lambda *a: (unload(), sys.exit(0)))
-    signal.signal(signal.SIGINT, lambda *a: (unload(), sys.exit(0)))
+    signal.signal(signal.SIGTERM, lambda *a: (on_shutdown(), sys.exit(0)))
+    signal.signal(signal.SIGINT, lambda *a: (on_shutdown(), sys.exit(0)))
 
-    # Run auto-install in background — never block startup
     threading.Thread(target=auto_install, daemon=True).start()
-
     api = Api()
-
-    # Don't load model on startup — user clicks ▶ Start or OCR button
 
     url = os.path.join(str(RESOURCES), 'index.html')
     if not os.path.exists(url):
         url = os.path.join(str(APP_DIR.parent / 'Resources'), 'index.html')
 
     window = webview.create_window(
-        title='RTIP OCR',
+        title='RTIP — ReadingTextImgPdf',
         url=url, js_api=api,
-        width=960, height=700,
-        min_size=(700, 500),
+        width=1060, height=780,
+        min_size=(800, 600),
         confirm_close=True, text_select=True,
     )
     api.window = window
     webview.start(debug=False, http_server=True, private_mode=False)
-    unload()
+    on_shutdown()
     os._exit(0)
