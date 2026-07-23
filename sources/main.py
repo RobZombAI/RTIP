@@ -51,7 +51,7 @@ def do_ocr(image_path, prompt="Extract all text from this document."):
     if ocr_cancel.is_set(): return '[CANCELLED]'
     return result
 
-def ocr_pdf(pdf_path, prompt="Extract all text from this document.", dpi=200):
+def ocr_pdf(pdf_path, prompt="Extract all text from this document.", dpi=150):
     try:
         import fitz
     except ImportError:
@@ -70,7 +70,7 @@ def ocr_pdf(pdf_path, prompt="Extract all text from this document.", dpi=200):
     doc.close()
     return pages
 
-def _ocr_pdf_fallback(pdf_path, prompt, dpi=200):
+def _ocr_pdf_fallback(pdf_path, prompt, dpi=150):
     import tempfile
     tmpdir = tempfile.mkdtemp(prefix='ocr_pdf_')
     subprocess.run(['sips', '-s', 'format', 'png', '--resampleWidth', str(8.5 * dpi),
