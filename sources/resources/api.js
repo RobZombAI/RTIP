@@ -253,6 +253,35 @@ function llmResponse(text) {
   hideProgress();
   document.getElementById('chatMessages').innerHTML = '';
   addChat('assistant', text);
+  // Replace main result with processed text
+  currentFullText = text;
+  currentPages = splitIntoPages(text);
+  currentPage = 0;
+  showPage(0);
+  document.getElementById('actionBtns').style.display = '';
+  if (currentPages.length > 1) {
+    document.getElementById('pageNav').style.display = '';
+    document.getElementById('pageTotal').textContent = currentPages.length;
+  } else { document.getElementById('pageNav').style.display = 'none'; }
+  document.getElementById('resultTitle').textContent = '🤖 Processed';
+  document.getElementById('saveToast').classList.remove('visible');
+  // Re-enable action buttons
+  document.querySelectorAll('.action-btns .btn').forEach(b => b.disabled = false);
+}
+
+function splitIntoPages(text) {
+  // Try to split by page markers, fallback to chunks
+  const parts = text.split(/=== PAGE \d+\/\d+ ===/);
+  if (parts.length > 1) return parts.filter(p => p.trim()).map(p => p.trim());
+  // If text is long, split into ~3000 char chunks
+  if (text.length > 4000) {
+    const chunks = [];
+    for (let i = 0; i < text.length; i += 3000) {
+      chunks.push(text.slice(i, i + 3000));
+    }
+    return chunks;
+  }
+  return [text];
 }
 
 function llmError(msg) {
