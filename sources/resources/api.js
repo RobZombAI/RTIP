@@ -142,7 +142,9 @@ function cancelOcr() {
     document.getElementById('ocrBtn').textContent = '🔍 OCR';
     document.getElementById('ocrBtn').classList.remove('loading');
     showError('Cancelled');
-  }, 500);
+    // Re-load model for next use
+    startModel();
+  }, 800);
 }
 
 function showResult(data) {

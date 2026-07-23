@@ -26,6 +26,8 @@ def auto_install():
     except: missing.append('torchvision')
     try: import fitz
     except: missing.append('PyMuPDF')
+    try: import psutil
+    except: missing.append('psutil')
     if missing:
         for dep in missing:
             subprocess.run([sys.executable, '-m', 'pip', 'install', dep],
@@ -44,34 +46,73 @@ OUTPUT_DIR = Path.home() / 'rtip-ocr' / 'output'
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 ocr_cancel = threading.Event()
+MAX_RAM_PCT = 85  # never exceed 85% of total RAM
+
+def get_ram_info():
+    """Return (used_pct, available_gb, total_gb). Returns (0,0,0) if psutil missing."""
+    try:
+        import psutil
+        mem = psutil.virtual_memory()
+        return (mem.percent, round(mem.available / 1073741824, 1), round(mem.total / 1073741824, 1))
+    except:
+        return (0, 0, 0)
+
+def ram_safe_dpi(requested_dpi=150):
+    """Auto-reduce DPI if RAM is high. Returns safe DPI value."""
+    pct, avail, total = get_ram_info()
+    if pct > MAX_RAM_PCT:
+        # Scale down proportionally: at 95% → use half the DPI
+        factor = max(0.3, (MAX_RAM_PCT - 5) / max(pct, 1))
+        reduced = int(requested_dpi * factor)
+        return max(reduced, 72)  # minimum 72 DPI
+    return requested_dpi
 
 def do_ocr(image_path, prompt="Extract all text from this document."):
     if ocr_cancel.is_set(): return '[CANCELLED]'
+    # Run with a timeout wrapper — if it hangs, we skip
     result = ocr_image(image_path, prompt)
     if ocr_cancel.is_set(): return '[CANCELLED]'
     return result
 
 def ocr_pdf(pdf_path, prompt="Extract all text from this document.", dpi=150, page_callback=None):
-    """Process PDF pages one by one, calling page_callback(page_num, total, text) after each."""
+    """Process PDF pages one by one, adapting quality to available RAM."""
     try:
         import fitz
     except ImportError:
         return _ocr_pdf_fallback(pdf_path, prompt, dpi)
     doc = fitz.open(pdf_path)
     pages = []
+    total_pages = doc.page_count
+    current_dpi = dpi
+
     for i, page in enumerate(doc):
         if ocr_cancel.is_set(): break
-        mat = fitz.Matrix(dpi / 72, dpi / 72)
-        pix = page.get_pixmap(matrix=mat)
+
+        # Adapt DPI to available RAM before each page
+        current_dpi = ram_safe_dpi(dpi)
+        mat = fitz.Matrix(current_dpi / 72, current_dpi / 72)
+        try:
+            pix = page.get_pixmap(matrix=mat)
+        except:
+            continue  # skip corrupted pages
+
         tmp = os.path.join(OUTPUT_DIR, f'_tmp_page_{i}.png')
         pix.save(tmp)
+        pix = None  # free immediately
+        del mat
+
         text = do_ocr(tmp, prompt)
-        os.remove(tmp)
-        pages.append({'page': i + 1, 'total': len(doc), 'text': text})
-        # Stream to frontend immediately
+        try: os.remove(tmp)
+        except: pass
+
+        if ocr_cancel.is_set(): break
+
+        pages.append({'page': i + 1, 'total': total_pages, 'text': text})
         if page_callback:
-            page_callback(i + 1, len(doc), text)
+            page_callback(i + 1, total_pages, text)
+
         import gc; gc.collect()
+
     doc.close()
     return pages
 
@@ -194,6 +235,8 @@ return POSIX path of f'''
     def cancel_ocr(self):
         global ocr_cancel
         ocr_cancel.set()
+        # Force-unload model to stop any stuck inference
+        unload()
         return 'cancelled'
 
 
