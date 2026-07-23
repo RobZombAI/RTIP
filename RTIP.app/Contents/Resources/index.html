@@ -166,6 +166,28 @@ footer { text-align:center; padding:3px; font-size:8px; color:var(--text2); bord
       <button class="btn btn-primary" id="actionBtn" disabled>▶ Process</button>
       <div class="action-btns" id="actionBtns" style="display:none">
         <button class="btn btn-ghost btn-sm" onclick="llmAction('translate')">🌐 Translate</button>
+        <select id="langSelect" style="font-size:10px;padding:2px 4px;background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:3px;cursor:pointer">
+          <option value="Italian">🇮🇹 Italiano</option>
+          <option value="English">🇬🇧 English</option>
+          <option value="French">🇫🇷 Français</option>
+          <option value="Spanish">🇪🇸 Español</option>
+          <option value="German">🇩🇪 Deutsch</option>
+          <option value="Portuguese">🇵🇹 Português</option>
+          <option value="Dutch">🇳🇱 Nederlands</option>
+          <option value="Russian">🇷🇺 Русский</option>
+          <option value="Chinese">🇨🇳 中文</option>
+          <option value="Japanese">🇯🇵 日本語</option>
+          <option value="Korean">🇰🇷 한국어</option>
+          <option value="Arabic">🇸🇦 العربية</option>
+          <option value="Hindi">🇮🇳 हिन्दी</option>
+          <option value="Turkish">🇹🇷 Türkçe</option>
+          <option value="Greek">🇬🇷 Ελληνικά</option>
+          <option value="Polish">🇵🇱 Polski</option>
+          <option value="Swedish">🇸🇪 Svenska</option>
+          <option value="Danish">🇩🇰 Dansk</option>
+          <option value="Norwegian">🇳🇴 Norsk</option>
+          <option value="Finnish">🇫🇮 Suomi</option>
+        </select>
         <button class="btn btn-ghost btn-sm" onclick="llmAction('summarize')">📝 Summarize</button>
         <button class="btn btn-ghost btn-sm" onclick="llmAction('rewrite')">✏️ Rewrite</button>
       </div>

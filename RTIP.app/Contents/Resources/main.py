@@ -351,10 +351,11 @@ return POSIX path of f'''
         ocr_unload()
 
     # ── LLM post-processing ──
-    def llm_process(self, text, action):
-        """Post-process text: translate, summarize, rewrite, or custom."""
+    def llm_process(self, text, action, lang='Italian'):
+        """Post-process text: translate to LANG, summarize, rewrite, or custom."""
+        translate_prompt = f'Translate the following text to {lang}. Preserve formatting:\n\n'
         prompts = {
-            'translate': 'Translate the following text to Italian. Preserve formatting:\n\n',
+            'translate': translate_prompt,
             'summarize': 'Summarize the following text in 3-5 key points:\n\n',
             'rewrite': 'Rewrite the following text in a clear, professional style:\n\n',
         }

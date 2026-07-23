@@ -234,15 +234,16 @@ function prevPage() { if (currentPage > 0) showPage(currentPage - 1); }
 // ═══ LLM Post-Processing ──
 function llmAction(action) {
   if (!currentFullText) return;
+  const lang = document.getElementById('langSelect')?.value || 'Italian';
   const btn = event.target;
-  const labels = {translate: '🌐 Translating…', summarize: '📝 Summarizing…', rewrite: '✏️ Rewriting…'};
+  const labels = {translate: '🌐 Translating to ' + lang + '…', summarize: '📝 Summarizing…', rewrite: '✏️ Rewriting…'};
   btn.textContent = labels[action] || '⏳ Processing…';
   btn.disabled = true;
   showProgress(labels[action] || 'Processing…');
   document.getElementById('chatSection').classList.add('visible');
   document.getElementById('chatMessages').innerHTML = '';
   addChat('system', '🤖 Agents A1 processing…');
-  pywebview.api.llm_process(currentFullText, action).then(() => {
+  pywebview.api.llm_process(currentFullText, action, lang).then(() => {
     btn.textContent = action.charAt(0).toUpperCase() + action.slice(1);
     btn.disabled = false;
   });
