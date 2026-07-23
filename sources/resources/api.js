@@ -145,6 +145,11 @@ function cancelOcr() {
   }, 500);
 }
 
+function showLoading() {
+  document.getElementById('ocrProgress').style.display = 'flex';
+  document.getElementById('ocrProgressLabel').textContent = 'OCR in progress…';
+}
+
 function showResult(data) {
   document.getElementById('ocrProgress').style.display = 'none';
   lastOcrResult = data; isProcessing = false;
