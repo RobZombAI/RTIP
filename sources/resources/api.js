@@ -1,18 +1,20 @@
 // ═══════════════════════════════════════════
-//  RTIP — Image OCR + PDF Reader
+//  RTIP — Session Manager + AI Post-Processing
 // ═══════════════════════════════════════════
 
 let selectedPath = null;
 let isProcessing = false;
-let currentType = null; // 'image' or 'pdf'
+let currentType = null;
 let currentPages = [];
 let currentPage = 0;
 let currentFullText = '';
+let currentSid = null;
 let currentSavePath = '';
 let chatHistory = [];
+let sessions = [];
 
 document.addEventListener('DOMContentLoaded', () => {
-  if (typeof pywebview !== 'undefined') pollStatus();
+  if (typeof pywebview !== 'undefined') { pollStatus(); refreshSessions(); }
 });
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
@@ -21,43 +23,79 @@ function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 async function pollStatus() {
   try {
     const s = await pywebview.api.get_status();
-    updateStatus(s);
+    setDot('ocr', s.ocr ? 'on' : (s.ocr === 'loading' ? 'loading' : 'off'));
+    setDot('llm', s.llm ? 'on' : 'off');
   } catch(_) {}
   setTimeout(pollStatus, 3000);
 }
 
-function updateStatus(s) {
-  if (s.ocr) { setModel('ocr', 'on'); }
-  else if (s.ocr === 'loading') { setModel('ocr', 'loading'); }
-  else { setModel('ocr', 'off'); }
-  setModel('llm', s.llm ? 'on' : 'off');
+function setDot(id, state) {
+  document.getElementById(id + 'Dot').className = 'status-dot ' + state;
 }
 
-function setModel(m, state) {
-  const dot = document.getElementById(m + 'Dot');
-  dot.className = 'status-dot ' + state;
-  if (state === 'on') {
-    document.getElementById(m + 'Start').style.display = 'none';
-    document.getElementById(m + 'Stop').style.display = '';
-  } else {
-    document.getElementById(m + 'Start').style.display = '';
-    document.getElementById(m + 'Stop').style.display = 'none';
+// ═══ Sessions ──
+async function refreshSessions() {
+  if (typeof pywebview === 'undefined') return;
+  try {
+    sessions = JSON.parse(await pywebview.api.get_sessions());
+  } catch(e) { sessions = []; }
+  renderSessions();
+}
+
+function renderSessions() {
+  const list = document.getElementById('sessionList');
+  document.getElementById('sessionCount').textContent = sessions.length + ' sessions';
+  if (sessions.length === 0) {
+    list.innerHTML = '<div style="padding:12px;font-size:10px;color:var(--text2);text-align:center">No sessions yet</div>';
+    return;
   }
+  list.innerHTML = sessions.map(s => `
+    <div class="session-item${s.id === currentSid ? ' active' : ''}" onclick="openSession('${s.id}')">
+      <div class="name">${escHtml(s.file)}</div>
+      <div class="meta">
+        <span class="badge-type badge-${s.type}">${s.type}</span>
+        <span>${s.chars}c</span>
+        <span>${s.pages}p</span>
+        <span class="del" onclick="event.stopPropagation();deleteSession('${s.id}')">✕</span>
+      </div>
+    </div>`).join('');
 }
 
-async function startModel(m) {
-  document.getElementById(m + 'Dot').className = 'status-dot loading';
-  if (m === 'ocr') await pywebview.api.start_ocr();
-  else await pywebview.api.start_llm();
+async function openSession(sid) {
+  try {
+    const data = JSON.parse(await pywebview.api.load_session(sid));
+    currentSid = sid;
+    currentFullText = data.raw || '';
+    currentPages = (data.pages || []).map(p => p.text);
+    currentPage = 0;
+    currentSavePath = '';
+    currentType = data.type;
+    showPage(0);
+    document.getElementById('resultArea').classList.add('visible');
+    document.getElementById('resultTitle').textContent = data.type === 'pdf' ? '📄 ' + data.file : '🖼️ ' + data.file;
+    document.getElementById('saveToast').classList.remove('visible');
+    document.getElementById('actionBtns').style.display = '';
+    document.getElementById('chatSection').classList.remove('visible');
+    document.getElementById('chatMessages').innerHTML = '';
+    if (currentPages.length > 1) {
+      document.getElementById('pageNav').style.display = '';
+      document.getElementById('pageTotal').textContent = currentPages.length;
+    } else {
+      document.getElementById('pageNav').style.display = 'none';
+    }
+    renderSessions();
+  } catch(e) { showError(e); }
 }
 
-async function stopModel(m) {
-  if (m === 'ocr') await pywebview.api.stop_ocr();
-  else await pywebview.api.stop_llm();
+async function deleteSession(sid) {
+  try {
+    sessions = JSON.parse(await pywebview.api.delete_session(sid));
+    if (sid === currentSid) { currentSid = null; clearResult(); }
+    renderSessions();
+  } catch(e) {}
 }
 
 // ═══ File selection ──
-
 document.getElementById('dropZone').addEventListener('click', async () => {
   try {
     const p = await pywebview.api.pick_file();
@@ -67,13 +105,12 @@ document.getElementById('dropZone').addEventListener('click', async () => {
 
 async function selectFile(path) {
   selectedPath = path; currentPage = 0; currentPages = [];
-  currentType = null; currentFullText = '';
+  currentType = null; currentFullText = ''; currentSid = null;
   document.getElementById('pageNav').style.display = 'none';
-  document.getElementById('analyzeBtn').style.display = 'none';
+  document.getElementById('actionBtns').style.display = 'none';
   document.getElementById('chatSection').classList.remove('visible');
   document.getElementById('saveToast').classList.remove('visible');
-  document.getElementById('actionBar').style.display = '';
-  document.getElementById('infoBox').classList.remove('visible');
+  hideError();
 
   const info = await pywebview.api.file_info(path);
   currentType = info.type;
@@ -85,113 +122,85 @@ async function selectFile(path) {
 
   const badge = document.getElementById('fileBadge');
   badge.textContent = info.type.toUpperCase();
-  badge.className = 'file-badge badge-' + info.type;
+  badge.style.background = info.type === 'pdf' ? 'var(--error)' : 'var(--accent2)';
+  badge.style.color = '#fff';
 
   const img = document.getElementById('previewImg');
   if (info.type === 'image') {
     const b64 = await pywebview.api.read_file_b64(path);
-    img.src = 'data:image/png;base64,' + b64;
-    img.style.display = '';
+    img.src = 'data:image/png;base64,' + b64; img.style.display = '';
   } else { img.style.display = 'none'; }
-
   document.getElementById('dropZone').classList.add('has-file');
 
-  // Configure action bar
-  const box = document.getElementById('infoBox');
+  const btn = document.getElementById('actionBtn');
   if (info.type === 'pdf') {
-    box.className = 'info-box visible info-pdf';
-    box.innerHTML = '📄 PDF: text extraction + optional AI analysis';
-    const btn = document.getElementById('actionBtn');
-    btn.textContent = '📝 Extract text';
-    btn.disabled = false;
-    btn.onclick = extractPdf;
+    btn.textContent = '📝 Extract text'; btn.onclick = extractPdf;
   } else {
-    box.className = 'info-box visible info-image';
-    box.innerHTML = '🖼️ Image: OCR text extraction';
-    const btn = document.getElementById('actionBtn');
-    btn.textContent = '🔍 OCR';
-    btn.disabled = false;
-    btn.onclick = runOcr;
+    btn.textContent = '🔍 OCR'; btn.onclick = runOcr;
   }
+  btn.disabled = false;
 }
 
-// ═══ PDF text extraction ──
-
+// ═══ PDF extraction ──
 async function extractPdf() {
   if (!selectedPath || isProcessing) return;
   isProcessing = true;
-  showProgress('Extracting text from PDF…');
+  showProgress('Extracting PDF text…');
   document.getElementById('resultArea').classList.add('visible');
   document.getElementById('resultBody').innerHTML = '<div class="loading-indicator"><div class="spinner"></div><div>Extracting…</div></div>';
-  hideError();
-  try { await pywebview.api.extract_pdf_text(selectedPath); }
+  try { await pywebview.api.extract_pdf(selectedPath); }
   catch (e) { showError(e); isProcessing = false; }
 }
 
 // ═══ Image OCR ──
-
 async function runOcr() {
   if (!selectedPath || isProcessing) return;
   isProcessing = true;
   showProgress('OCR in progress…');
   document.getElementById('resultArea').classList.add('visible');
-  document.getElementById('resultBody').innerHTML = '<div class="loading-indicator"><div class="spinner"></div><div>OCR in progress…</div></div>';
-  hideError();
-  try { await pywebview.api.run_ocr(selectedPath, document.getElementById('promptInput').value || 'Extract all text from this document.'); }
+  document.getElementById('resultBody').innerHTML = '<div class="loading-indicator"><div class="spinner"></div><div>OCR…</div></div>';
+  try { await pywebview.api.run_ocr(selectedPath, ''); }
   catch (e) { showError(e); isProcessing = false; }
 }
 
 function showLoading() { showProgress('Processing…'); }
 
+// ═══ Results ──
 function streamPage(data) {
   currentPages[data.page - 1] = data.text;
-  document.getElementById('progressLabel').textContent = 'Page ' + data.page + '/' + data.total + '…';
+  document.getElementById('progressLabel').textContent = 'Page ' + data.page + '/' + data.total;
   document.getElementById('progressDetail').textContent = data.text.length + ' chars';
   const body = document.getElementById('resultBody');
   if (body.children.length === 1 && body.children[0].className === 'loading-indicator') body.innerHTML = '';
   const d = document.createElement('div');
-  d.style.cssText = 'padding:4px 8px;margin:2px 0;background:var(--surface2);border-radius:4px;font-size:12px;color:var(--success);';
-  d.textContent = '📄 Page ' + data.page + '/' + data.total + ' ✓ (' + data.text.length + ' chars)';
-  body.appendChild(d);
-  body.scrollTop = body.scrollHeight;
+  d.style.cssText = 'padding:3px 6px;margin:1px 0;background:var(--surface2);border-radius:3px;font-size:11px;color:var(--success);';
+  d.textContent = '📄 Page ' + data.page + '/' + data.total + ' ✓';
+  body.appendChild(d); body.scrollTop = body.scrollHeight;
 }
 
 function showResult(data) {
   hideProgress(); isProcessing = false;
-  currentFullText = data.raw;
-  currentSavePath = data.save_path;
-  currentPage = 0;
-
-  // Parse pages
-  if (data.type === 'pdf' && data.pages) {
-    currentPages = data.pages.map(p => p.text);
-  } else {
-    currentPages = [data.raw];
-  }
-
+  currentFullText = data.raw; currentSavePath = data.save_path;
+  currentSid = data.sid; currentPage = 0;
+  currentPages = data.pages.map(p => p.text);
   showPage(0);
   document.getElementById('savePath').textContent = data.save_path;
   document.getElementById('saveToast').classList.add('visible');
-
+  document.getElementById('actionBtns').style.display = '';
+  document.getElementById('resultTitle').textContent = data.type === 'pdf' ? '📄 PDF OCR' : '🖼️ Image OCR';
   if (currentPages.length > 1) {
     document.getElementById('pageNav').style.display = '';
     document.getElementById('pageTotal').textContent = currentPages.length;
-    document.getElementById('analyzeBtn').style.display = '';
-  } else {
-    document.getElementById('pageNav').style.display = 'none';
-    document.getElementById('analyzeBtn').style.display = currentType === 'pdf' ? '' : 'none';
-  }
-  document.getElementById('resultTitle').textContent = data.type === 'pdf' ? '📄 PDF Text' : '🖼️ OCR Result';
-  document.getElementById('actionBar').style.display = 'none';
+  } else { document.getElementById('pageNav').style.display = 'none'; }
+  document.getElementById('actionBtn').disabled = true;
 }
 
 function showPage(idx) {
   currentPage = Math.max(0, Math.min(idx, currentPages.length - 1));
-  const body = document.getElementById('resultBody');
-  body.innerHTML = '';
+  document.getElementById('resultBody').innerHTML = '';
   const pre = document.createElement('pre');
   pre.textContent = currentPages[currentPage] || '[empty]';
-  body.appendChild(pre);
+  document.getElementById('resultBody').appendChild(pre);
   document.getElementById('pageNum').textContent = currentPage + 1;
   if (document.getElementById('prevPg')) document.getElementById('prevPg').disabled = currentPage === 0;
   if (document.getElementById('nextPg')) document.getElementById('nextPg').disabled = currentPage === currentPages.length - 1;
@@ -200,93 +209,86 @@ function showPage(idx) {
 function nextPage() { if (currentPage < currentPages.length - 1) showPage(currentPage + 1); }
 function prevPage() { if (currentPage > 0) showPage(currentPage - 1); }
 
-// ═══ Analyze with LLM ──
-
-function openAnalyze() {
+// ═══ LLM Post-Processing ──
+function llmAction(action) {
+  if (!currentFullText) return;
+  const btn = event.target;
+  const labels = {translate: '🌐 Translating…', summarize: '📝 Summarizing…', rewrite: '✏️ Rewriting…'};
+  btn.textContent = labels[action] || '⏳ Processing…';
+  btn.disabled = true;
+  showProgress(labels[action] || 'Processing…');
   document.getElementById('chatSection').classList.add('visible');
-  document.getElementById('chatMessages').innerHTML = '<div class="chat-msg system">🤖 Agents A1 ready. Ask about this document.</div>';
-  document.getElementById('analyzeBtn').style.display = 'none';
+  document.getElementById('chatMessages').innerHTML = '';
+  addChat('system', '🤖 Agents A1 processing…');
+  pywebview.api.llm_process(currentFullText, action).then(() => {
+    btn.textContent = action.charAt(0).toUpperCase() + action.slice(1);
+    btn.disabled = false;
+  });
 }
 
-async function chatSend() {
+function llmResponse(text) {
+  hideProgress();
+  document.getElementById('chatMessages').innerHTML = '';
+  addChat('assistant', text);
+}
+
+function llmError(msg) {
+  hideProgress();
+  document.getElementById('chatMessages').innerHTML = '';
+  addChat('assistant', '❌ ' + msg);
+}
+
+function chatSend() {
   const inp = document.getElementById('chatInput');
   const msg = inp.value.trim();
   if (!msg) return;
   inp.value = '';
+  document.getElementById('chatSection').classList.add('visible');
   addChat('user', msg);
   addChat('assistant', '<span class="loading-dots">Thinking</span>');
-
   const pageText = currentPages[currentPage] || '';
-  try {
-    await pywebview.api.llm_analyze(pageText, msg);
-  } catch(e) {
-    removeLastChat();
-    addChat('assistant', '❌ Error: ' + e);
-  }
+  const context = currentFullText ? 'Context from document:\n' + currentFullText.slice(0, 5000) + '\n\n' : '';
+  pywebview.api.llm_chat((context || '') + msg, JSON.stringify(chatHistory));
+  chatHistory.push({role: 'user', content: msg});
 }
-
-function llmResponse(t) { removeLastChat(); addChat('assistant', t); }
-function llmError(m) { removeLastChat(); addChat('assistant', '❌ ' + m); }
 
 function addChat(role, text) {
   const d = document.createElement('div');
-  d.className = 'chat-msg ' + role;
-  d.innerHTML = text;
-  document.getElementById('chatMessages').appendChild(d);
-  document.getElementById('chatMessages').scrollTop = document.getElementById('chatMessages').scrollHeight;
-}
-
-function removeLastChat() {
+  d.className = 'chat-msg ' + role; d.innerHTML = text;
   const m = document.getElementById('chatMessages');
-  if (m.lastChild && m.lastChild.innerHTML.includes('loading-dots')) m.removeChild(m.lastChild);
+  m.appendChild(d); m.scrollTop = m.scrollHeight;
 }
 
 // ═══ Cancel ──
-
 function cancelCurrent() {
-  if (currentType === 'image') {
-    pywebview.api.cancel_ocr();
-  }
+  if (currentType === 'image') pywebview.api.cancel_ocr();
   hideProgress(); isProcessing = false;
   showError('Cancelled');
 }
 
 // ═══ Progress ──
-
 function showProgress(label) {
   document.getElementById('progressOverlay').classList.add('visible');
   document.getElementById('progressLabel').textContent = label;
   document.getElementById('progressDetail').textContent = '';
 }
-
-function hideProgress() {
-  document.getElementById('progressOverlay').classList.remove('visible');
-}
+function hideProgress() { document.getElementById('progressOverlay').classList.remove('visible'); }
 
 // ═══ Utils ──
-
-function showError(m) {
-  hideProgress(); isProcessing = false;
+function showError(m) { hideProgress(); isProcessing = false;
   document.getElementById('errorBanner').textContent = '❌ ' + m;
-  document.getElementById('errorBanner').classList.add('visible');
-}
+  document.getElementById('errorBanner').classList.add('visible'); }
 function hideError() { document.getElementById('errorBanner').classList.remove('visible'); }
+function clearResult() { document.getElementById('resultBody').innerHTML = '<div class="loading-indicator"><div class="spinner"></div><div>Select a file</div></div>';
+  document.getElementById('resultTitle').textContent = 'Ready';
+  document.getElementById('actionBtns').style.display = 'none'; }
 
-function copyText(text) {
+function copyAll() {
+  const text = currentFullText || (currentPages[currentPage] || '');
   if (!text) return;
   if (navigator.clipboard?.writeText) { navigator.clipboard.writeText(text).then(showCopy); }
-  else {
-    const ta = document.createElement('textarea'); ta.value = text;
-    ta.style.cssText = 'position:fixed;opacity:0'; document.body.appendChild(ta);
-    ta.select(); document.execCommand('copy'); document.body.removeChild(ta); showCopy();
-  }
+  else { const ta = document.createElement('textarea'); ta.value = text; ta.style.cssText = 'position:fixed;opacity:0'; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); document.body.removeChild(ta); showCopy(); }
 }
-
 function openFolder() { if (currentSavePath) pywebview.api.open_folder(currentSavePath); }
-
-function showCopy() {
-  const el = document.getElementById('copyToast');
-  el.classList.add('visible');
-  clearTimeout(window._ct);
-  window._ct = setTimeout(() => el.classList.remove('visible'), 2000);
-}
+function showCopy() { const el = document.getElementById('copyToast'); el.classList.add('visible'); clearTimeout(window._ct); window._ct = setTimeout(() => el.classList.remove('visible'), 2000); }
+function escHtml(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
