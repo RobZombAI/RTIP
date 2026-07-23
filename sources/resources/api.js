@@ -111,6 +111,28 @@ function showLoading() {
   document.getElementById('ocrProgressLabel').textContent = 'OCR in progress…';
 }
 
+function streamPage(data) {
+  // Append live page result
+  const body = document.getElementById('resultBody');
+  // Remove loading indicator if present
+  if (body.children.length === 1 && body.children[0].classList.contains('loading-indicator')) {
+    body.innerHTML = '';
+  }
+  // Add or update page result
+  const existing = document.getElementById('page-' + data.page);
+  if (existing) {
+    existing.textContent = '📄 Page ' + data.page + '/' + data.total + ' ✓';
+  } else {
+    const div = document.createElement('div');
+    div.id = 'page-' + data.page;
+    div.style.cssText = 'padding:4px 8px;margin:2px 0;background:var(--surface2);border-radius:4px;font-size:12px;color:var(--success);';
+    div.textContent = '📄 Page ' + data.page + '/' + data.total + ' ✓';
+    body.appendChild(div);
+    body.scrollTop = body.scrollHeight;
+  }
+  document.getElementById('ocrProgressLabel').textContent = 'Page ' + data.page + '/' + data.total + '…';
+}
+
 function cancelOcr() {
   document.getElementById('ocrProgressLabel').textContent = 'Cancelling…';
   pywebview.api.cancel_ocr();

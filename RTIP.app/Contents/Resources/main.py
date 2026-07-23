@@ -51,7 +51,8 @@ def do_ocr(image_path, prompt="Extract all text from this document."):
     if ocr_cancel.is_set(): return '[CANCELLED]'
     return result
 
-def ocr_pdf(pdf_path, prompt="Extract all text from this document.", dpi=150):
+def ocr_pdf(pdf_path, prompt="Extract all text from this document.", dpi=150, page_callback=None):
+    """Process PDF pages one by one, calling page_callback(page_num, total, text) after each."""
     try:
         import fitz
     except ImportError:
@@ -67,6 +68,10 @@ def ocr_pdf(pdf_path, prompt="Extract all text from this document.", dpi=150):
         text = do_ocr(tmp, prompt)
         os.remove(tmp)
         pages.append({'page': i + 1, 'total': len(doc), 'text': text})
+        # Stream to frontend immediately
+        if page_callback:
+            page_callback(i + 1, len(doc), text)
+        import gc; gc.collect()
     doc.close()
     return pages
 
@@ -165,7 +170,13 @@ return POSIX path of f'''
                 ftype = detect_file_type(image_path)
                 raw_text = ""
                 if ftype == 'pdf':
-                    for p in ocr_pdf(image_path, prompt):
+                    def on_page(num, total, text):
+                        if self.window:
+                            try:
+                                self.window.evaluate_js(
+                                    f"streamPage({json.dumps({'page':num,'total':total,'text':text[:200]})})")
+                            except: pass
+                    for p in ocr_pdf(image_path, prompt, page_callback=on_page):
                         if ocr_cancel.is_set(): break
                         raw_text += f"\n=== PAGE {p['page']}/{p['total']} ===\n{p['text']}\n"
                 else:
