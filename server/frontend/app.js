@@ -326,20 +326,21 @@ async function runTimelens() {
     const maxTime = Math.max(...intervals.map(i => i[1]), 10);
     let html = '<div class="timeline-wrap">';
     html += `<div class="timeline-query">🔍 <strong>${escHtml(query)}</strong></div>`;
-    html += '<div class="timeline-bar">';
+    html += '<div class="timeline-bar" id="timelineBar">';
     for (const [start, end] of intervals) {
       const left = (start / maxTime) * 100;
       const w = Math.max(((end - start) / maxTime) * 100, 2);
-      html += `<div class="timeline-segment" style="left:${left}%;width:${w}%">${w > 8 ? start + 's' : ''}</div>`;
+      html += `<div class="timeline-segment" data-start="${start}" data-end="${end}" style="left:${left}%;width:${w}%;cursor:pointer" title="Play ${start}s - ${end}s">${w > 8 ? start + 's' : ''}</div>`;
     }
     html += '</div>';
     html += '<div class="timeline-labels"><span>0s</span><span>' + Math.round(maxTime) + 's</span></div>';
     html += '</div>';
 
     html += '<div style="margin-top:10px">';
-    html += '<div style="font-size:10px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">⏱ Time Spans</div>';
+    html += '<div style="font-size:10px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">⏱ Time Spans — click to play ▶</div>';
     intervals.forEach(([start, end], i) => {
-      html += `<div class="timeline-interval">${i+1}. <strong>${start.toFixed(1)}s → ${end.toFixed(1)}s</strong> (${(end-start).toFixed(1)}s)</div>`;
+      const dur = (end - start).toFixed(1);
+      html += `<div class="timeline-interval" data-start="${start}" data-end="${end}" style="cursor:pointer;padding:3px 6px;border-radius:4px;transition:0.15s" onclick="playSegment(${start},${end})" onmouseover="this.style.background='var(--surface3)'" onmouseout="this.style.background=''">${i+1}. <strong>${start.toFixed(1)}s → ${end.toFixed(1)}s</strong> (${dur}s) ▶</div>`;
     });
     html += '</div>';
 
@@ -347,6 +348,13 @@ async function runTimelens() {
       <pre style="font-size:10px;margin-top:4px;color:var(--text2)">${escHtml(data.raw || '')}</pre></details>`;
 
     body.innerHTML = html;
+
+    // Add click handlers to timeline segments
+    document.querySelectorAll('.timeline-segment[data-start]').forEach(el => {
+      el.addEventListener('click', () => {
+        playSegment(parseFloat(el.dataset.start), parseFloat(el.dataset.end));
+      });
+    });
   } catch(e) {
     document.getElementById('videoOverlay').style.display = 'none';
     document.getElementById('videoBtn').disabled = false;
@@ -418,6 +426,30 @@ async function delSession(sid) {
 }
 
 // ── Utils ──
+
+// Play video segment (called from timeline clicks)
+function playSegment(start, end) {
+  const player = document.getElementById('videoPlayer');
+  if (!player || !player.src) return;
+  player.currentTime = start;
+  player.play();
+  document.querySelectorAll('.timeline-segment').forEach(el => {
+    el.style.opacity = '0.4';
+    el.style.boxShadow = 'none';
+  });
+  document.querySelectorAll(`.timeline-segment[data-start="${start}"]`).forEach(el => {
+    el.style.opacity = '1';
+    el.style.boxShadow = '0 0 15px rgba(163, 113, 247, 0.7)';
+  });
+  const onTime = () => {
+    if (player.currentTime >= end) {
+      player.pause();
+      player.removeEventListener('timeupdate', onTime);
+    }
+  };
+  player.addEventListener('timeupdate', onTime);
+}
+
 function showOverlay(label) {
   const ov = document.getElementById('overlay');
   document.getElementById('overlayLabel').textContent = label;
