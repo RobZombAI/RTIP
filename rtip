@@ -2,11 +2,17 @@
 DIR="$(cd "$(dirname "$0")" && pwd)"
 SERVER="$DIR/server/rtip-server"
 
+# Kill any previous instances
 for PID in $(pgrep -f "rtip-server" 2>/dev/null); do
   kill -9 $PID 2>/dev/null
 done
 
 echo "🚀 Starting RTIP v2..."
 echo "   Server:  http://127.0.0.1:8080"
+echo "   Log:     $HOME/.rtip.log"
 echo "   Cmd+C to stop"
+
+# Start server
 "$SERVER"
+
+echo "👋 RTIP stopped"

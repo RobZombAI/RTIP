@@ -216,6 +216,18 @@ int main() {
             {"timelens",    is_alive(g_timelens_pid)},
             {"llm_model",   file_exists(g_llm_model)},
         };
+        // Check TimeLens actual model status from worker
+        if (is_alive(g_timelens_pid)) {
+            auto cli = make_client(9102);
+            auto r = cli.Get("/");
+            if (r) {
+                try {
+                    auto tl = json::parse(r->body);
+                    s["timelens_status"] = tl.value("status", "unknown");
+                    s["timelens_message"] = tl.value("message", "");
+                } catch (...) {}
+            }
+        }
         res.set_content(s.dump(), "application/json");
     });
 

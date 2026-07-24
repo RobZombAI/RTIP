@@ -40,10 +40,20 @@ async function pollStatus() {
     const s = await r.json();
     setDot('statOcr', s.ocr ? 'on' : 'off');
     setDot('statLlm', s.llm ? 'on' : 'off');
-    setDot('statTs', s.timelens ? 'on' : 'off');
+
+    // TimeLens status: handle loading/ready/error states
+    const tlStatus = s.timelens_status || (s.timelens ? 'ready' : 'off');
+    const tlState = s.timelens ? (tlStatus === 'ready' ? 'on' : tlStatus === 'loading' ? 'loading' : 'off') : 'off';
+    setDot('statTs', tlState);
+
+    // If TimeLens errored, show message
+    if (s.timelens_message && s.timelens_status === 'error') {
+      document.querySelector('#statTs .dot').title = '❌ ' + s.timelens_message;
+    }
+
     document.getElementById('statRam').textContent = `🧠 ${systemInfo?.ram_gb || '?'}GB RAM`;
   } catch(_) {}
-  setTimeout(pollStatus, 3000);
+  setTimeout(pollStatus, 2000);
 }
 
 function setDot(id, state) {
