@@ -122,13 +122,14 @@
       </div>
 
       <div class="drop-zone" id="videoDrop">
-        <input type="file" id="videoFileInput" accept=".mp4,.mov,.avi,.mkv" style="display:none">
+        <input type="file" id="videoFileInput" accept="video/*" style="display:none">
         <div class="drop-content" id="videoDropContent">
           <div class="drop-icon">🎬</div>
           <div class="drop-label">Click to select a video file</div>
           <div class="drop-sub">MP4, MOV — temporal grounding con TimeLens2-8B</div>
         </div>
-        <div class="drop-preview" id="videoPreview" style="display:none">
+        <div class="drop-preview" id="videoPreview" style="display:none;flex-direction:column;width:100%;gap:6px">
+          <video id="videoPlayer" controls style="max-height:200px;border-radius:6px;width:100%;background:#000"></video>
           <div class="preview-info">
             <div class="preview-name" id="videoFileName"></div>
             <div class="preview-meta"><span class="badge badge-video">VIDEO</span> <span id="videoSize"></span></div>

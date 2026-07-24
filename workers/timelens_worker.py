@@ -28,6 +28,14 @@ def _cleanup():
 
 def load_model():
     global model, processor, load_status, load_error
+    # Auto-install torchcodec if missing
+    try:
+        import torchcodec
+    except ImportError:
+        import subprocess as _subprocess, sys as _sys
+        print("[TimeLens] Installing torchcodec for video reading...", file=_sys.stderr)
+        _subprocess.run([_sys.executable, '-m', 'pip', 'install', 'torchcodec', '-q'],
+                      capture_output=True, timeout=120)
     try:
         from qwen_vl_utils import process_vision_info  # verify importable
         from transformers import AutoProcessor
@@ -63,8 +71,8 @@ def process_video(video_path, query):
         "role": "user",
         "content": [
             {"type": "video", "video": Path(video_path).resolve().as_uri(),
-             "fps": 2.0, "min_pixels": 32*32, "max_pixels": 480*480,
-             "total_pixels": 128000 * 32 * 32},
+             "fps": 1.0, "min_pixels": 28*28, "max_pixels": 360*360,
+             "total_pixels": 64000 * 28 * 28},
             {"type": "text", "text": prompt},
         ],
     }]

@@ -92,14 +92,33 @@ function setupDropZones() {
   videoInput.addEventListener('change', async (e) => {
     const file = e.target.files[0];
     if (!file) return;
+
+    // Show video preview immediately (before upload)
+    const videoUrl = URL.createObjectURL(file);
+    const player = document.getElementById('videoPlayer');
+    player.src = videoUrl;
+    player.load();
+
+    document.getElementById('videoDropContent').style.display = 'none';
+    document.getElementById('videoPreview').style.display = 'flex';
+    document.getElementById('videoFileName').textContent = file.name;
+    document.getElementById('videoSize').textContent = (file.size / 1048576).toFixed(1) + ' MB';
+    document.getElementById('videoDrop').classList.add('has-file', 'video-active');
+    document.getElementById('videoQuery').disabled = false;
+    document.getElementById('videoQuery').focus();
+    document.getElementById('videoBtn').disabled = false;
+    document.getElementById('videoResult').style.display = 'flex';
+    document.getElementById('videoResultBody').innerHTML = '<div class="empty-state">Enter a query and click Analyze</div>';
+
+    // Upload to server for processing (background)
     const form = new FormData();
     form.append('file', file);
     try {
       const r = await fetch(`${API}/api/upload`, {method: 'POST', body: form});
       const data = await r.json();
       if (data.error) { showToast('❌ ' + data.error); return; }
-      selectVideoFile(data.path, file.name, data.size);
-    } catch(e) { showToast('❌ ' + e.message); }
+      videoPath = data.path;  // server path for processing
+    } catch(e) { showToast('❌ Upload: ' + e.message); }
     videoInput.value = '';
   });
 }
