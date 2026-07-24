@@ -71,45 +71,59 @@ def process_video(video_path, query):
         "role": "user",
         "content": [
             {"type": "video", "video": Path(video_path).resolve().as_uri(),
-             "fps": 1.0, "min_pixels": 28*28, "max_pixels": 360*360,
-             "total_pixels": 64000 * 28 * 28},
+             "fps": 0.5, "min_pixels": 16*16, "max_pixels": 224*224,
+             "total_pixels": 16000 * 16 * 16},
             {"type": "text", "text": prompt},
         ],
     }]
 
-    with torch.no_grad():
-        text = processor.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
-        images, videos, video_kwargs = process_vision_info(
-            messages, image_patch_size=16,
-            return_video_kwargs=True, return_video_metadata=True,
-        )
-        if videos is not None:
-            videos, video_metadatas = zip(*videos)
-            videos, video_metadatas = list(videos), list(video_metadatas)
-        else:
-            video_metadatas = None
+    # Clean MPS cache before processing
+    _cleanup()
 
-        inputs = processor(text=text, images=images, videos=videos,
-                          video_metadata=video_metadatas, do_resize=False,
-                          return_tensors="pt", **video_kwargs).to(model.device)
+    try:
+        with torch.no_grad():
+            text = processor.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+            images, videos, video_kwargs = process_vision_info(
+                messages, image_patch_size=16,
+                return_video_kwargs=True, return_video_metadata=True,
+            )
+            if videos is not None:
+                videos, video_metadatas = zip(*videos)
+                videos, video_metadatas = list(videos), list(video_metadatas)
+            else:
+                video_metadatas = None
 
-        output_ids = model.generate(**inputs, max_new_tokens=4096,
-            temperature=0.01, top_p=0.001, top_k=1, repetition_penalty=1.0)
-        output_ids = [out[len(inputs.input_ids):] for out in output_ids]
-        response = processor.batch_decode(output_ids, skip_special_tokens=True,
-                                         clean_up_tokenization_spaces=False)[0]
+            inputs = processor(text=text, images=images, videos=videos,
+                              video_metadata=video_metadatas, do_resize=False,
+                              return_tensors="pt", **video_kwargs).to(model.device)
 
+            output_ids = model.generate(**inputs, max_new_tokens=1024,
+                temperature=0.01, top_p=0.001, top_k=1, repetition_penalty=1.0)
+            output_ids = [out[len(inputs.input_ids):] for out in output_ids]
+            response = processor.batch_decode(output_ids, skip_special_tokens=True,
+                                             clean_up_tokenization_spaces=False)[0]
+
+            _cleanup()
+
+            intervals = []
+            try:
+                # Cerca l'ultimo array JSON nella risposta
+                import re
+                matches = re.findall(r'\[[\d.,\s\[\]]+\]', response)
+                for m in reversed(matches):
+                    parsed = json.loads(m)
+                    if isinstance(parsed, list) and len(parsed) > 0 and isinstance(parsed[0], (list, tuple)):
+                        intervals = parsed
+                        break
+            except:
+                pass
+
+            return intervals, response
+    except RuntimeError as e:
+        # MPS crash — force cleanup and return error
+        print(f"[TimeLens] MPS error: {e}", file=sys.stderr)
         _cleanup()
-
-        intervals = []
-        try:
-            parsed = json.loads(response)
-            if isinstance(parsed, list):
-                intervals = parsed
-        except:
-            pass
-
-        return intervals, response
+        return [], str(e)
 
 
 class TimeLensHandler(BaseHTTPRequestHandler):

@@ -195,6 +195,35 @@ int main() {
 
     std::this_thread::sleep_for(std::chrono::seconds(2));
 
+    // Worker health-check thread: respawn dead workers
+    std::thread health_thread([&]() {
+        while (true) {
+            std::this_thread::sleep_for(std::chrono::seconds(10));
+            if (!is_alive(g_ocr_pid)) {
+                std::cout << "[RTIP] OCR worker dead, respawning..." << std::endl;
+                kill_proc(g_ocr_pid);
+                g_ocr_pid = spawn(g_venv_python, {g_workers_dir + "/ocr_worker.py", "--port", "9101"});
+            }
+            if (g_ram_gb >= 20 && !is_alive(g_timelens_pid)) {
+                std::cout << "[RTIP] TimeLens worker dead, respawning..." << std::endl;
+                kill_proc(g_timelens_pid);
+                g_timelens_pid = spawn(g_venv_python, {g_workers_dir + "/timelens_worker.py", "--port", "9102"});
+            }
+            if (!is_alive(g_llama_pid) && file_exists(g_llm_model)) {
+                std::cout << "[RTIP] llama-server dead, respawning..." << std::endl;
+                kill_proc(g_llama_pid);
+                g_llama_pid = spawn("llama-server", {
+                    "--model", g_llm_model,
+                    "--host", "127.0.0.1", "--port", "8081",
+                    "--temp", "0.1", "--ctx-size", "32768",
+                    "-ngl", "99", "--parallel", "1",
+                    "--cont-batching", "--mlock"
+                });
+            }
+        }
+    });
+    health_thread.detach();
+
     // ── HTTP server ──
     httplib::Server svr;
 
