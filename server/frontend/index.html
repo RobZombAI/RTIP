@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>RTIP — ReadingTextImgPdf</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="app">
+  <!-- Sidebar -->
+  <aside class="sidebar">
+    <div class="sidebar-header">
+      <div class="logo">📖</div>
+      <div class="logo-text">RTIP <small>v2</small></div>
+    </div>
+    <div class="sidebar-status">
+      <div class="stat" id="statRam">🧠 — GB</div>
+      <div class="stat" id="statOcr">🖼️ OCR <span class="dot off"></span></div>
+      <div class="stat" id="statLlm">🤖 LLM <span class="dot off"></span></div>
+      <div class="stat" id="statTs">🎬 TimeLens <span class="dot off"></span></div>
+    </div>
+    <div class="sidebar-section">
+      <div class="section-title">📂 Sessions</div>
+      <div class="session-list" id="sessionList">
+        <div class="session-empty">No sessions yet</div>
+      </div>
+    </div>
+  </aside>
+
+  <!-- Main -->
+  <main class="main">
+    <!-- Tab bar -->
+    <nav class="tabs">
+      <button class="tab active" data-tab="doc" onclick="switchTab('doc')">
+        <span class="tab-icon">📄</span> Document
+      </button>
+      <button class="tab" data-tab="video" onclick="switchTab('video')">
+        <span class="tab-icon">🎬</span> Video
+      </button>
+      <div class="tab-spacer"></div>
+      <span class="tab-info" id="sysInfo"></span>
+    </nav>
+
+    <!-- ═══ Document Tab ═══ -->
+    <div class="tab-pane active" id="pane-doc">
+      <!-- Tech info -->
+      <div class="tech-bar">
+        <span>🖼️ <strong>LightOnOCR</strong> ≥4GB RAM</span>
+        <span>📄 <strong>PyMuPDF</strong> 0 GPU</span>
+        <span>🤖 <strong>Agents A1</strong> ≥48GB RAM</span>
+      </div>
+
+      <!-- Drop zone -->
+      <div class="drop-zone" id="docDrop">
+        <input type="file" id="docFileInput" accept=".png,.jpg,.jpeg,.gif,.webp,.bmp,.pdf" style="display:none">
+        <div class="drop-content" id="docDropContent">
+          <div class="drop-icon">📁</div>
+          <div class="drop-label">Click to select image or PDF</div>
+          <div class="drop-sub">Images → OCR · PDFs → text extraction + AI</div>
+        </div>
+        <div class="drop-preview" id="docPreview" style="display:none">
+          <div class="preview-info">
+            <div class="preview-name" id="docFileName"></div>
+            <div class="preview-meta"><span id="docBadge"></span> <span id="docSize"></span></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Controls -->
+      <div class="ctrl-bar">
+        <button class="btn btn-primary" id="docActionBtn" disabled onclick="docProcess()">▶ Process</button>
+        <div class="action-group" id="docActions" style="display:none">
+          <button class="btn btn-ghost" onclick="llmAction('translate')">🌐 Translate</button>
+          <select id="langSelect" class="lang-select">
+            <option value="Italian">🇮🇹 Italiano</option>
+            <option value="English">🇬🇧 English</option>
+            <option value="French">🇫🇷 Français</option>
+            <option value="Spanish">🇪🇸 Español</option>
+            <option value="German">🇩🇪 Deutsch</option>
+          </select>
+          <button class="btn btn-ghost" onclick="llmAction('summarize')">📝 Summarize</button>
+          <button class="btn btn-ghost" onclick="llmAction('rewrite')">✏️ Rewrite</button>
+        </div>
+      </div>
+
+      <!-- Result -->
+      <div class="result" id="docResult" style="display:none">
+        <div class="result-bar">
+          <span class="result-title" id="docResultTitle">Ready</span>
+          <div class="result-actions">
+            <button class="btn btn-icon" onclick="copyText()" title="Copy">📋</button>
+          </div>
+        </div>
+        <div class="result-body" id="docResultBody">
+          <pre></pre>
+        </div>
+        <!-- Chat -->
+        <div class="chat" id="chatSection">
+          <div class="chat-msgs" id="chatMessages">
+            <div class="msg system">💬 Chat — fai domande sul testo</div>
+          </div>
+          <div class="chat-input-row">
+            <input type="text" id="chatInput" placeholder="Ask about this document…">
+            <button class="btn btn-sm btn-primary" onclick="chatSend()">➤</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Loading overlay -->
+      <div class="overlay" id="overlay" style="display:none">
+        <div class="spinner"></div>
+        <div id="overlayLabel">Processing…</div>
+      </div>
+    </div>
+
+    <!-- ═══ Video Tab ═══ -->
+    <div class="tab-pane" id="pane-video">
+      <div class="tech-bar">
+        <span>🎬 <strong>TimeLens2-8B</strong> ≥20GB RAM</span>
+        <span>🧠 trova scene da query · intervalli [start,end]</span>
+      </div>
+
+      <div class="drop-zone" id="videoDrop">
+        <input type="file" id="videoFileInput" accept=".mp4,.mov,.avi,.mkv" style="display:none">
+        <div class="drop-content" id="videoDropContent">
+          <div class="drop-icon">🎬</div>
+          <div class="drop-label">Click to select a video file</div>
+          <div class="drop-sub">MP4, MOV — temporal grounding con TimeLens2-8B</div>
+        </div>
+        <div class="drop-preview" id="videoPreview" style="display:none">
+          <div class="preview-info">
+            <div class="preview-name" id="videoFileName"></div>
+            <div class="preview-meta"><span class="badge badge-video">VIDEO</span> <span id="videoSize"></span></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="video-ctrl">
+        <input type="text" id="videoQuery" placeholder='Describe what to find, e.g. "A man opens the refrigerator"' disabled>
+        <button class="btn btn-video" id="videoBtn" disabled onclick="runTimelens()">🎯 Analyze</button>
+      </div>
+
+      <div class="result" id="videoResult" style="display:none">
+        <div class="result-bar">
+          <span class="result-title">🎬 Temporal Grounding</span>
+        </div>
+        <div class="result-body" id="videoResultBody">
+          <div class="empty-state">Select a video and enter a query</div>
+        </div>
+      </div>
+
+      <div class="overlay" id="videoOverlay" style="display:none">
+        <div class="spinner" style="border-top-color:#a371f7"></div>
+        <div>🎬 TimeLens2 analyzing…</div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<div class="toast" id="toast"></div>
+<script src="app.js"></script>
+</body>
+</html>

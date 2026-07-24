@@ -1,92 +1,54 @@
 #!/bin/bash
 set -e
 DIR="$(cd "$(dirname "$0")" && pwd)"
-APP="$DIR/RTIP.app"
-SOURCES="$DIR/sources"
-VENV="/Users/robzomb/qwen3-tts-ui/venv"
 
-echo "🔨 Building RTIP.app..."
+echo "🔨 Building RTIP v2..."
 
-rm -rf "$APP" 2>/dev/null
-mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
+# 1. Build C++ server
+echo "  [1/4] Compiling C++ server..."
+cd "$DIR/server"
+make clean 2>/dev/null
+make -j4 2>&1 | grep -v "^$"
 
-# Launcher — kill vecchie istanze + avvio pulito
-cat > "$APP/Contents/MacOS/RTIP" << 'LAUNCHER'
+# 2. Validate Python workers
+echo "  [2/4] Validating Python workers..."
+for w in ocr_worker.py timelens_worker.py; do
+  python3 -c "import ast; ast.parse(open('$DIR/workers/$w').read())" && echo "    ✅ $w"
+done
+
+# 3. Create launcher
+echo "  [3/4] Creating launcher..."
+LAUNCHER="$DIR/rtip"
+cat > "$LAUNCHER" << 'SCRIPT'
 #!/bin/bash
-DIR="$(cd "$(dirname "$0")/.." && pwd)"
-cd "$DIR" || exit 1
-LOGFILE="$HOME/.rtip.log"
-VENV="/Users/robzomb/qwen3-tts-ui/venv"
-export PATH="$VENV/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
-unset PYTHONHOME PYTHONPATH
+DIR="$(cd "$(dirname "$0")" && pwd)"
+SERVER="$DIR/server/rtip-server"
 
-echo "[$(date)] Starting RTIP..." > "$LOGFILE"
-
-# Kill ANY previous RTIP instance (non solo per porta)
-for PID in $(pgrep -f "Resources/main.py" 2>/dev/null); do
-  kill -9 "$PID" 2>/dev/null
-  echo "[$(date)] Killed old RTIP (PID $PID)" >> "$LOGFILE"
+# Kill any previous instances
+for PID in $(pgrep -f "rtip-server" 2>/dev/null); do
+  kill -9 $PID 2>/dev/null
 done
 
-# Also clean any leftover python on RTIP ports
-for port in 8125 8126 8127 8128; do
-  PID=$(lsof -ti :$port 2>/dev/null)
-  if [ -n "$PID" ]; then
-    kill -9 $PID 2>/dev/null
-    echo "[$(date)] Freed port $port (PID $PID)" >> "$LOGFILE"
-  fi
-done
+echo "🚀 Starting RTIP v2..."
+echo "   Server:  http://127.0.0.1:8080"
+echo "   Log:     $HOME/.rtip.log"
+echo "   Cmd+C to stop"
 
-echo "[$(date)] Python: $VENV/bin/python3" >> "$LOGFILE"
-exec "$VENV/bin/python3" -u "$DIR/Resources/main.py" >> "$LOGFILE" 2>&1
-LAUNCHER
-chmod +x "$APP/Contents/MacOS/RTIP"
+# Start server
+"$SERVER"
 
-# Plist
-cat > "$APP/Contents/Info.plist" << PLIST
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>CFBundleExecutable</key>
-    <string>RTIP</string>
-    <key>CFBundleIdentifier</key>
-    <string>com.rtip.app</string>
-    <key>CFBundleName</key>
-    <string>RTIP</string>
-    <key>CFBundleDisplayName</key>
-    <string>RTIP — ReadingTextImgPdf</string>
-    <key>CFBundleVersion</key>
-    <string>2.0.0</string>
-    <key>CFBundleShortVersionString</key>
-    <string>2.0</string>
-    <key>CFBundlePackageType</key>
-    <string>APPL</string>
-    <key>LSMinimumSystemVersion</key>
-    <string>10.15</string>
-    <key>NSHighResolutionCapable</key>
-    <true/>
-</dict>
-</plist>
-PLIST
-echo "APPL????" > "$APP/Contents/PkgInfo"
+echo "👋 RTIP stopped"
+SCRIPT
+chmod +x "$LAUNCHER"
 
-# Source files
-cp "$SOURCES/main.py" "$APP/Contents/Resources/main.py"
-cp "$SOURCES/lighton_ocr.py" "$APP/Contents/Resources/lighton_ocr.py"
-cp "$SOURCES/timelens_video.py" "$APP/Contents/Resources/timelens_video.py"
-cp "$SOURCES/resources/index.html" "$APP/Contents/Resources/index.html"
-cp "$SOURCES/resources/api.js" "$APP/Contents/Resources/api.js"
+# 4. Install
+echo "  [4/4] Installing..."
+cp "$LAUNCHER" /usr/local/bin/rtip 2>/dev/null || true
 
-# Validate
-python3 -c "import ast; ast.parse(open('$APP/Contents/Resources/main.py').read()); print('✅ main.py OK')"
-python3 -c "import ast; ast.parse(open('$APP/Contents/Resources/lighton_ocr.py').read()); print('✅ lighton_ocr.py OK')"
-echo "✅ Built: $(wc -c < $APP/Contents/Resources/api.js) bytes JS · $(wc -c < $APP/Contents/Resources/index.html) bytes HTML"
-
-# Install
-rm -rf "$HOME/Applications/RTIP.app" 2>/dev/null
-cp -R "$APP" "$HOME/Applications/RTIP.app"
-echo "✅ Installed: ~/Applications/RTIP.app"
-echo "📦 Size: $(du -sh $APP | cut -f1)"
 echo ""
-echo "🚀 Open with: open ~/Applications/RTIP.app"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "  ✅ RTIP v2 built!"
+echo ""
+echo "  Run:   ./rtip"
+echo "  Open:  http://127.0.0.1:8080"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
