@@ -68,6 +68,7 @@ echo "APPL????" > "$APP/Contents/PkgInfo"
 # Source files
 cp "$SOURCES/main.py" "$APP/Contents/Resources/main.py"
 cp "$SOURCES/lighton_ocr.py" "$APP/Contents/Resources/lighton_ocr.py"
+cp "$SOURCES/timelens_video.py" "$APP/Contents/Resources/timelens_video.py"
 cp "$SOURCES/resources/index.html" "$APP/Contents/Resources/index.html"
 cp "$SOURCES/resources/api.js" "$APP/Contents/Resources/api.js"
 

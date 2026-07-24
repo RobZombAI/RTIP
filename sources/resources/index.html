@@ -9,7 +9,7 @@
   --bg: #0d1117; --surface: #161b22; --surface2: #21262d;
   --border: #30363d; --text: #e6edf3; --text2: #8b949e;
   --accent: #58a6ff; --accent2: #1f6feb; --success: #3fb950;
-  --error: #f85149; --warning: #d29922;
+  --error: #f85149; --warning: #d29922; --video: #a371f7;
 }
 * { margin:0; padding:0; box-sizing:border-box; }
 body { font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; background:var(--bg); color:var(--text); height:100vh; display:flex; flex-direction:column; overflow:hidden; }
@@ -41,9 +41,21 @@ header h1 span { color:var(--accent); }
 .badge-type { font-size:8px; padding:1px 4px; border-radius:3px; font-weight:600; }
 .badge-image { background:var(--accent2); color:#fff; }
 .badge-pdf { background:var(--error); color:#fff; }
+.badge-video { background:var(--video); color:#fff; }
 
 /* ── Main ── */
 .main { flex:1; display:flex; flex-direction:column; padding:12px; gap:8px; overflow:hidden; position:relative; }
+
+/* Tab bar */
+.tab-bar { display:flex; gap:0; border-bottom:1px solid var(--border); flex-shrink:0; }
+.tab { padding:6px 16px; font-size:11px; font-weight:600; cursor:pointer; border-bottom:2px solid transparent; color:var(--text2); transition:.15s; user-select:none; }
+.tab:hover { color:var(--text); }
+.tab.active { color:var(--accent); border-bottom-color:var(--accent); }
+
+/* Tab panes */
+.tab-pane { display:none; flex-direction:column; gap:8px; flex:1; overflow:hidden; }
+.tab-pane.active { display:flex; }
+
 .drop-zone { border:2px dashed var(--border); border-radius:8px; padding:18px; text-align:center; cursor:pointer; transition:.2s; background:var(--surface); flex-shrink:0; }
 .drop-zone:hover { border-color:var(--accent); background:var(--surface2); }
 .drop-zone .icon { font-size:22px; margin-bottom:2px; }
@@ -51,16 +63,24 @@ header h1 span { color:var(--accent); }
 .drop-zone .sub { font-size:10px; color:var(--text2); margin-top:1px; }
 .drop-zone.has-file { padding:6px; border-style:solid; border-color:var(--accent2); display:flex; align-items:center; gap:8px; }
 .drop-zone.has-file img { height:40px; border-radius:4px; cursor:pointer; }
+.drop-zone.video-active { border-color:var(--video); }
 .file-meta { flex:1; text-align:left; }
 .file-name { font-size:11px; font-weight:500; }
 .file-info { font-size:10px; color:var(--text2); margin-top:1px; }
 
 .controls { display:flex; gap:6px; align-items:center; flex-shrink:0; }
+.video-controls { display:flex; gap:6px; align-items:stretch; flex-shrink:0; }
+.video-query-wrap { flex:1; display:flex; gap:6px; }
+.video-query-wrap input { flex:1; padding:5px 10px; border:1px solid var(--border); border-radius:5px; background:var(--bg); color:var(--text); font-size:11px; outline:none; min-width:0; }
+.video-query-wrap input:focus { border-color:var(--video); }
+
 .btn { padding:6px 14px; border:none; border-radius:5px; font-size:11px; font-weight:600; cursor:pointer; transition:.15s; white-space:nowrap; display:inline-flex; align-items:center; gap:4px; }
 .btn:disabled { opacity:.4; cursor:not-allowed; }
 .btn-primary { background:var(--accent2); color:#fff; }
 .btn-primary:hover:not(:disabled) { background:var(--accent); }
 .btn-primary.loading { pointer-events:none; opacity:.7; }
+.btn-video { background:var(--video); color:#fff; }
+.btn-video:hover:not(:disabled) { filter:brightness(1.2); }
 .btn-danger { background:var(--error); color:#fff; }
 .btn-danger:hover { filter:brightness(1.2); }
 .btn-ghost { background:var(--surface2); color:var(--text); border:1px solid var(--border); }
@@ -84,6 +104,17 @@ header h1 span { color:var(--accent); }
 .result-body { flex:1; overflow-y:auto; padding:8px 12px; }
 .result-body pre { font-size:12px; line-height:1.5; white-space:pre-wrap; word-break:break-word; color:var(--text); font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; }
 
+/* Timeline for video results */
+.timeline-wrap { padding:8px 0; }
+.timeline-bar { position:relative; height:32px; background:var(--surface2); border-radius:6px; border:1px solid var(--border); overflow:hidden; margin:4px 0; }
+.timeline-segment { position:absolute; top:2px; bottom:2px; background:var(--video); border-radius:3px; opacity:.7; display:flex; align-items:center; justify-content:center; font-size:8px; color:#fff; font-weight:600; min-width:fit-content; padding:0 4px; }
+.timeline-labels { display:flex; justify-content:space-between; font-size:9px; color:var(--text2); }
+.timeline-query { font-size:11px; font-weight:600; color:var(--text); margin-bottom:6px; }
+.timeline-interval { font-size:10px; color:var(--text2); }
+.timeline-interval strong { color:var(--video); }
+
+.timeline-empty { text-align:center; padding:12px; color:var(--text2); font-size:11px; }
+
 .page-nav { display:flex; align-items:center; gap:4px; font-size:10px; }
 .page-nav button { background:var(--surface2); border:1px solid var(--border); color:var(--text); padding:1px 8px; border-radius:3px; cursor:pointer; font-size:10px; }
 .page-nav button:disabled { opacity:.3; cursor:default; }
@@ -97,7 +128,6 @@ header h1 span { color:var(--accent); }
 .chat-msg.user { background:var(--accent2); color:#fff; align-self:flex-end; }
 .chat-msg.assistant { background:var(--surface2); color:var(--text); border:1px solid var(--border); align-self:flex-start; }
 .chat-msg.system { background:var(--warning); color:#000; align-self:center; font-size:10px; }
-.chat-messages { max-height:150px; overflow-y:auto; display:flex; flex-direction:column; gap:3px; }
 
 .loading-indicator { text-align:center; padding:20px; color:var(--text2); }
 .spinner { display:inline-block; width:16px; height:16px; border:2px solid var(--border); border-top-color:var(--accent); border-radius:50%; animation:spin .8s linear infinite; margin-bottom:6px; }
@@ -123,6 +153,7 @@ footer { text-align:center; padding:3px; font-size:8px; color:var(--text2); bord
 <div class="status-bar" id="statusBar">
   <div class="status-item"><span class="status-dot off" id="ocrDot"></span><span class="status-label">OCR</span></div>
   <div class="status-item"><span class="status-dot off" id="llmDot"></span><span class="status-label">LLM</span></div>
+  <div class="status-item"><span class="status-dot off" id="timelensDot"></span><span class="status-label">TimeLens</span></div>
   <button class="btn btn-danger btn-sm" id="globalCancelBtn" onclick="cancelCurrent()" style="display:none;margin-left:auto">⏹ STOP</button>
 </div>
 <div class="container">
@@ -146,81 +177,124 @@ footer { text-align:center; padding:3px; font-size:8px; color:var(--text2); bord
     </div>
     <div class="error-banner" id="errorBanner"></div>
 
-    <div class="drop-zone" id="dropZone">
-      <div id="dropContent">
-        <div class="icon">📁</div>
-        <div class="label">Click to select image or PDF</div>
-        <div class="sub">Images → OCR · PDFs → text extraction + AI</div>
+    <!-- Tab bar -->
+    <div class="tab-bar">
+      <div class="tab active" data-tab="doc" onclick="switchTab('doc')">📄 Document</div>
+      <div class="tab" data-tab="video" onclick="switchTab('video')">🎬 Video</div>
+    </div>
+
+    <!-- ═══ Document Tab ═══ -->
+    <div class="tab-pane active" id="pane-doc">
+      <div class="drop-zone" id="docDropZone">
+        <div id="docDropContent">
+          <div class="icon">📁</div>
+          <div class="label">Click to select image or PDF</div>
+          <div class="sub">Images → OCR · PDFs → text extraction + AI</div>
+        </div>
+        <div id="docFilePreview" style="display:none">
+          <img id="docPreviewImg" style="height:40px;border-radius:4px;cursor:pointer;display:none">
+          <div class="file-meta">
+            <div class="file-name" id="docFileName"></div>
+            <div class="file-info"><span id="docFileBadge" style="font-size:8px;font-weight:600;padding:1px 4px;border-radius:3px"></span> <span id="docFileSize"></span></div>
+          </div>
+        </div>
       </div>
-      <div id="filePreview" style="display:none">
-        <img id="previewImg" style="height:40px;border-radius:4px;cursor:pointer;display:none">
-        <div class="file-meta">
-          <div class="file-name" id="fileName"></div>
-          <div class="file-info"><span id="fileBadge" style="font-size:8px;font-weight:600;padding:1px 4px;border-radius:3px"></span> <span id="fileSize"></span></div>
+
+      <div class="controls">
+        <button class="btn btn-primary" id="docActionBtn" disabled>▶ Process</button>
+        <div class="action-btns" id="docActionBtns" style="display:none">
+          <button class="btn btn-ghost btn-sm" onclick="llmAction('translate')">🌐 Translate</button>
+          <select id="langSelect" style="font-size:10px;padding:2px 4px;background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:3px;cursor:pointer">
+            <option value="Italian">🇮🇹 Italiano</option>
+            <option value="English">🇬🇧 English</option>
+            <option value="French">🇫🇷 Français</option>
+            <option value="Spanish">🇪🇸 Español</option>
+            <option value="German">🇩🇪 Deutsch</option>
+            <option value="Portuguese">🇵🇹 Português</option>
+            <option value="Dutch">🇳🇱 Nederlands</option>
+            <option value="Russian">🇷🇺 Русский</option>
+            <option value="Chinese">🇨🇳 中文</option>
+            <option value="Japanese">🇯🇵 日本語</option>
+            <option value="Korean">🇰🇷 한국어</option>
+            <option value="Arabic">🇸🇦 العربية</option>
+            <option value="Hindi">🇮🇳 हिन्दी</option>
+            <option value="Turkish">🇹🇷 Türkçe</option>
+            <option value="Greek">🇬🇷 Ελληνικά</option>
+            <option value="Polish">🇵🇱 Polski</option>
+            <option value="Swedish">🇸🇪 Svenska</option>
+            <option value="Danish">🇩🇰 Dansk</option>
+            <option value="Norwegian">🇳🇴 Norsk</option>
+            <option value="Finnish">🇫🇮 Suomi</option>
+          </select>
+          <button class="btn btn-ghost btn-sm" onclick="llmAction('summarize')">📝 Summarize</button>
+          <button class="btn btn-ghost btn-sm" onclick="llmAction('rewrite')">✏️ Rewrite</button>
+        </div>
+      </div>
+
+      <div class="save-toast" id="docSaveToast">
+        <span>💾</span><span class="path" id="docSavePath"></span>
+        <button class="btn btn-ghost btn-sm" onclick="copyAll()">📋 Copy</button>
+        <button class="btn btn-ghost btn-sm" onclick="openFolder()">📂 Open</button>
+      </div>
+
+      <div class="result-area" id="docResultArea">
+        <div class="result-header">
+          <span class="title" id="docResultTitle">Ready</span>
+          <div class="page-nav" id="docPageNav" style="display:none">
+            <button id="docPrevPg" onclick="prevPage()">◀</button>
+            <span><span id="docPageNum">1</span>/<span id="docPageTotal">1</span></span>
+            <button id="docNextPg" onclick="nextPage()">▶</button>
+          </div>
+        </div>
+        <div class="result-body" id="docResultBody"><div class="loading-indicator"><div class="spinner"></div><div>Select a file to start</div></div></div>
+        <div class="chat-section" id="chatSection">
+          <div class="chat-messages" id="chatMessages">
+            <div class="chat-msg system">💬 Chat — fai domande sul testo estratto</div>
+          </div>
+          <div class="chat-input">
+            <textarea id="chatInput" placeholder="Ask about this document…" rows="1"></textarea>
+            <button class="btn btn-primary btn-sm" onclick="chatSend()">➤</button>
+          </div>
         </div>
       </div>
     </div>
 
-    <div class="controls">
-      <button class="btn btn-primary" id="actionBtn" disabled>▶ Process</button>
-      <div class="action-btns" id="actionBtns" style="display:none">
-        <button class="btn btn-ghost btn-sm" onclick="llmAction('translate')">🌐 Translate</button>
-        <select id="langSelect" style="font-size:10px;padding:2px 4px;background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:3px;cursor:pointer">
-          <option value="Italian">🇮🇹 Italiano</option>
-          <option value="English">🇬🇧 English</option>
-          <option value="French">🇫🇷 Français</option>
-          <option value="Spanish">🇪🇸 Español</option>
-          <option value="German">🇩🇪 Deutsch</option>
-          <option value="Portuguese">🇵🇹 Português</option>
-          <option value="Dutch">🇳🇱 Nederlands</option>
-          <option value="Russian">🇷🇺 Русский</option>
-          <option value="Chinese">🇨🇳 中文</option>
-          <option value="Japanese">🇯🇵 日本語</option>
-          <option value="Korean">🇰🇷 한국어</option>
-          <option value="Arabic">🇸🇦 العربية</option>
-          <option value="Hindi">🇮🇳 हिन्दी</option>
-          <option value="Turkish">🇹🇷 Türkçe</option>
-          <option value="Greek">🇬🇷 Ελληνικά</option>
-          <option value="Polish">🇵🇱 Polski</option>
-          <option value="Swedish">🇸🇪 Svenska</option>
-          <option value="Danish">🇩🇰 Dansk</option>
-          <option value="Norwegian">🇳🇴 Norsk</option>
-          <option value="Finnish">🇫🇮 Suomi</option>
-        </select>
-        <button class="btn btn-ghost btn-sm" onclick="llmAction('summarize')">📝 Summarize</button>
-        <button class="btn btn-ghost btn-sm" onclick="llmAction('rewrite')">✏️ Rewrite</button>
+    <!-- ═══ Video Tab ═══ -->
+    <div class="tab-pane" id="pane-video">
+      <div class="drop-zone" id="videoDropZone">
+        <div id="videoDropContent">
+          <div class="icon">🎬</div>
+          <div class="label">Click to select a video file</div>
+          <div class="sub">MP4, MOV — temporal grounding with TimeLens2-8B</div>
+        </div>
+        <div id="videoFilePreview" style="display:none">
+          <div class="file-meta">
+            <div class="file-name" id="videoFileName"></div>
+            <div class="file-info"><span id="videoFileBadge" style="font-size:8px;font-weight:600;padding:1px 4px;border-radius:3px;background:var(--video);color:#fff">VIDEO</span> <span id="videoFileSize"></span></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="video-controls">
+        <div class="video-query-wrap">
+          <input type="text" id="videoQuery" placeholder="Describe what to find (e.g. &quot;A man opens the refrigerator&quot;)…" disabled>
+          <button class="btn btn-video" id="videoAnalyzeBtn" disabled onclick="runTimelens()">🎯 Analyze</button>
+        </div>
+      </div>
+
+      <div class="result-area" id="videoResultArea">
+        <div class="result-header">
+          <span class="title" id="videoResultTitle">🎬 Video Temporal Grounding</span>
+        </div>
+        <div class="result-body" id="videoResultBody">
+          <div class="loading-indicator"><div class="spinner"></div><div>Select a video and enter a query</div></div>
+        </div>
       </div>
     </div>
 
-    <div class="save-toast" id="saveToast">
-      <span>💾</span><span class="path" id="savePath"></span>
-      <button class="btn btn-ghost btn-sm" onclick="copyAll()">📋 Copy</button>
-      <button class="btn btn-ghost btn-sm" onclick="openFolder()">📂 Open</button>
-    </div>
-
-    <div class="result-area" id="resultArea">
-      <div class="result-header">
-        <span class="title" id="resultTitle">Ready</span>
-        <div class="page-nav" id="pageNav" style="display:none">
-          <button id="prevPg" onclick="prevPage()">◀</button>
-          <span><span id="pageNum">1</span>/<span id="pageTotal">1</span></span>
-          <button id="nextPg" onclick="nextPage()">▶</button>
-        </div>
-      </div>
-      <div class="result-body" id="resultBody"><div class="loading-indicator"><div class="spinner"></div><div>Select a file to start</div></div></div>
-      <div class="chat-section" id="chatSection">
-        <div class="chat-messages" id="chatMessages">
-          <div class="chat-msg system">💬 Chat — fai domande sul testo estratto</div>
-        </div>
-        <div class="chat-input">
-          <textarea id="chatInput" placeholder="Ask about this document…" rows="1"></textarea>
-          <button class="btn btn-primary btn-sm" onclick="chatSend()">➤</button>
-        </div>
-      </div>
-    </div>
   </div>
 </div>
-<footer>LightOnOCR-2-1B · Agents A1 · Apple M5 Max</footer>
+<footer>LightOnOCR-2-1B · Agents A1 · TimeLens2-8B · Apple M5 Max</footer>
 <div class="copy-toast" id="copyToast">✅ Copied</div>
 <script src="api.js"></script>
 </body>

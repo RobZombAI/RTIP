@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════════
-//  RTIP — Session Manager + AI Post-Processing
+//  RTIP — Session Manager + AI Post-Processing + Video Temporal Grounding
 // ═══════════════════════════════════════════
 
 let selectedPath = null;
@@ -13,6 +13,11 @@ let currentSavePath = '';
 let chatHistory = [];
 let sessions = [];
 let systemInfo = null;
+let activeTab = 'doc';
+
+// Video globals
+let videoPath = null;
+let videoProcessing = false;
 
 document.addEventListener('DOMContentLoaded', () => {
   if (typeof pywebview !== 'undefined') { initSystem(); pollStatus(); refreshSessions(); }
@@ -34,12 +39,21 @@ function showSystemInfo() {
   const el = document.createElement('span');
   el.id = 'sysInfo';
   el.style.cssText = 'font-size:10px;color:var(--text2);margin-left:auto;';
-  el.textContent = '🧠 ' + systemInfo.ram_gb + 'GB · ' + systemInfo.msg_ocr + ' · ' + systemInfo.msg_llm;
+  el.textContent = '🧠 ' + systemInfo.ram_gb + 'GB · ' + systemInfo.msg_ocr + ' · ' + systemInfo.msg_llm + ' · ' + systemInfo.msg_timelens;
   bar.appendChild(el);
   if (systemInfo.llm && !systemInfo.llm_file) addDownloadUI();
 }
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+// ═══ Tab switching ═══
+function switchTab(tab) {
+  activeTab = tab;
+  document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tab));
+  document.querySelectorAll('.tab-pane').forEach(p => p.classList.toggle('active', p.id === 'pane-' + tab));
+  // Hide global error banner when switching
+  hideError();
+}
 
 // ═══ Status ──
 async function pollStatus() {
@@ -47,6 +61,7 @@ async function pollStatus() {
     const s = await pywebview.api.get_status();
     setDot('ocr', s.ocr ? 'on' : (s.ocr === 'loading' ? 'loading' : 'off'));
     setDot('llm', s.llm ? 'on' : 'off');
+    setDot('timelens', s.timelens ? 'on' : (s.timelens === 'loading' ? 'loading' : 'off'));
   } catch(_) {}
   setTimeout(pollStatus, 3000);
 }
@@ -93,11 +108,13 @@ async function openSession(sid) {
     currentSavePath = '';
     currentType = data.type;
     chatHistory = data.chat || [];
+    // Switch to doc tab
+    switchTab('doc');
     showPage(0);
-    document.getElementById('resultArea').classList.add('visible');
-    document.getElementById('resultTitle').textContent = data.type === 'pdf' ? '📄 ' + data.file : '🖼️ ' + data.file;
-    document.getElementById('saveToast').classList.remove('visible');
-    document.getElementById('actionBtns').style.display = '';
+    document.getElementById('docResultArea').classList.add('visible');
+    document.getElementById('docResultTitle').textContent = data.type === 'pdf' ? '📄 ' + data.file : '🖼️ ' + data.file;
+    document.getElementById('docSaveToast').classList.remove('visible');
+    document.getElementById('docActionBtns').style.display = '';
     // Restore chat history
     const m = document.getElementById('chatMessages');
     m.innerHTML = '<div class="chat-msg system">💬 Chat — fai domande sul testo estratto</div>';
@@ -106,10 +123,10 @@ async function openSession(sid) {
       if (c.role === 'assistant') addChat('assistant', c.content);
     });
     if (currentPages.length > 1) {
-      document.getElementById('pageNav').style.display = '';
-      document.getElementById('pageTotal').textContent = currentPages.length;
+      document.getElementById('docPageNav').style.display = '';
+      document.getElementById('docPageTotal').textContent = currentPages.length;
     } else {
-      document.getElementById('pageNav').style.display = 'none';
+      document.getElementById('docPageNav').style.display = 'none';
     }
     renderSessions();
   } catch(e) { showError(e); }
@@ -118,49 +135,50 @@ async function openSession(sid) {
 async function deleteSession(sid) {
   try {
     sessions = JSON.parse(await pywebview.api.delete_session(sid));
-    if (sid === currentSid) { currentSid = null; clearResult(); }
+    if (sid === currentSid) { currentSid = null; clearDocResult(); }
     renderSessions();
   } catch(e) {}
 }
 
-// ═══ File selection ──
-document.getElementById('dropZone').addEventListener('click', async () => {
+// ═══ Document: File selection ──
+document.getElementById('docDropZone').addEventListener('click', async () => {
+  if (activeTab !== 'doc') return;
   try {
     const p = await pywebview.api.pick_file();
-    if (p) selectFile(p);
+    if (p) selectDocFile(p);
   } catch(_) {}
 });
 
-async function selectFile(path) {
+async function selectDocFile(path) {
   selectedPath = path; currentPage = 0; currentPages = [];
   currentType = null; currentFullText = ''; currentSid = null; chatHistory = [];
-  document.getElementById('pageNav').style.display = 'none';
-  document.getElementById('actionBtns').style.display = 'none';
-  document.getElementById('saveToast').classList.remove('visible');
+  document.getElementById('docPageNav').style.display = 'none';
+  document.getElementById('docActionBtns').style.display = 'none';
+  document.getElementById('docSaveToast').classList.remove('visible');
   document.getElementById('chatMessages').innerHTML = '<div class="chat-msg system">💬 Chat — fai domande sul testo estratto</div>';
   hideError();
 
   const info = await pywebview.api.file_info(path);
   currentType = info.type;
 
-  document.getElementById('dropContent').style.display = 'none';
-  document.getElementById('filePreview').style.display = 'flex';
-  document.getElementById('fileName').textContent = info.name;
-  document.getElementById('fileSize').textContent = info.size_str;
+  document.getElementById('docDropContent').style.display = 'none';
+  document.getElementById('docFilePreview').style.display = 'flex';
+  document.getElementById('docFileName').textContent = info.name;
+  document.getElementById('docFileSize').textContent = info.size_str;
 
-  const badge = document.getElementById('fileBadge');
+  const badge = document.getElementById('docFileBadge');
   badge.textContent = info.type.toUpperCase();
   badge.style.background = info.type === 'pdf' ? 'var(--error)' : 'var(--accent2)';
   badge.style.color = '#fff';
 
-  const img = document.getElementById('previewImg');
+  const img = document.getElementById('docPreviewImg');
   if (info.type === 'image') {
     const b64 = await pywebview.api.read_file_b64(path);
     img.src = 'data:image/png;base64,' + b64; img.style.display = '';
   } else { img.style.display = 'none'; }
-  document.getElementById('dropZone').classList.add('has-file');
+  document.getElementById('docDropZone').classList.add('has-file');
 
-  const btn = document.getElementById('actionBtn');
+  const btn = document.getElementById('docActionBtn');
   if (info.type === 'pdf') {
     btn.textContent = '📝 Extract text'; btn.onclick = extractPdf;
   } else {
@@ -174,8 +192,8 @@ async function extractPdf() {
   if (!selectedPath || isProcessing) return;
   isProcessing = true;
   showProgress('Extracting PDF text…');
-  document.getElementById('resultArea').classList.add('visible');
-  document.getElementById('resultBody').innerHTML = '<div class="loading-indicator"><div class="spinner"></div><div>Extracting…</div></div>';
+  document.getElementById('docResultArea').classList.add('visible');
+  document.getElementById('docResultBody').innerHTML = '<div class="loading-indicator"><div class="spinner"></div><div>Extracting…</div></div>';
   try { await pywebview.api.extract_pdf(selectedPath); }
   catch (e) { showError(e); isProcessing = false; }
 }
@@ -185,8 +203,8 @@ async function runOcr() {
   if (!selectedPath || isProcessing) return;
   isProcessing = true;
   showProgress('OCR in progress…');
-  document.getElementById('resultArea').classList.add('visible');
-  document.getElementById('resultBody').innerHTML = '<div class="loading-indicator"><div class="spinner"></div><div>OCR…</div></div>';
+  document.getElementById('docResultArea').classList.add('visible');
+  document.getElementById('docResultBody').innerHTML = '<div class="loading-indicator"><div class="spinner"></div><div>OCR…</div></div>';
   try { await pywebview.api.run_ocr(selectedPath, ''); }
   catch (e) { showError(e); isProcessing = false; }
 }
@@ -198,7 +216,7 @@ function streamPage(data) {
   currentPages[data.page - 1] = data.text;
   document.getElementById('progressLabel').textContent = 'Page ' + data.page + '/' + data.total;
   document.getElementById('progressDetail').textContent = data.text.length + ' chars';
-  const body = document.getElementById('resultBody');
+  const body = document.getElementById('docResultBody');
   if (body.children.length === 1 && body.children[0].className === 'loading-indicator') body.innerHTML = '';
   const d = document.createElement('div');
   d.style.cssText = 'padding:3px 6px;margin:1px 0;background:var(--surface2);border-radius:3px;font-size:11px;color:var(--success);';
@@ -212,26 +230,26 @@ function showResult(data) {
   currentSid = data.sid; currentPage = 0; chatHistory = [];
   currentPages = data.pages.map(p => p.text);
   showPage(0);
-  document.getElementById('savePath').textContent = data.save_path;
-  document.getElementById('saveToast').classList.add('visible');
-  document.getElementById('actionBtns').style.display = '';
-  document.getElementById('resultTitle').textContent = data.type === 'pdf' ? '📄 PDF OCR' : '🖼️ Image OCR';
+  document.getElementById('docSavePath').textContent = data.save_path;
+  document.getElementById('docSaveToast').classList.add('visible');
+  document.getElementById('docActionBtns').style.display = '';
+  document.getElementById('docResultTitle').textContent = data.type === 'pdf' ? '📄 PDF OCR' : '🖼️ Image OCR';
   if (currentPages.length > 1) {
-    document.getElementById('pageNav').style.display = '';
-    document.getElementById('pageTotal').textContent = currentPages.length;
-  } else { document.getElementById('pageNav').style.display = 'none'; }
-  document.getElementById('actionBtn').disabled = true;
+    document.getElementById('docPageNav').style.display = '';
+    document.getElementById('docPageTotal').textContent = currentPages.length;
+  } else { document.getElementById('docPageNav').style.display = 'none'; }
+  document.getElementById('docActionBtn').disabled = true;
 }
 
 function showPage(idx) {
   currentPage = Math.max(0, Math.min(idx, currentPages.length - 1));
-  document.getElementById('resultBody').innerHTML = '';
+  document.getElementById('docResultBody').innerHTML = '';
   const pre = document.createElement('pre');
   pre.textContent = currentPages[currentPage] || '[empty]';
-  document.getElementById('resultBody').appendChild(pre);
-  document.getElementById('pageNum').textContent = currentPage + 1;
-  if (document.getElementById('prevPg')) document.getElementById('prevPg').disabled = currentPage === 0;
-  if (document.getElementById('nextPg')) document.getElementById('nextPg').disabled = currentPage === currentPages.length - 1;
+  document.getElementById('docResultBody').appendChild(pre);
+  document.getElementById('docPageNum').textContent = currentPage + 1;
+  if (document.getElementById('docPrevPg')) document.getElementById('docPrevPg').disabled = currentPage === 0;
+  if (document.getElementById('docNextPg')) document.getElementById('docNextPg').disabled = currentPage === currentPages.length - 1;
 }
 
 function nextPage() { if (currentPage < currentPages.length - 1) showPage(currentPage + 1); }
@@ -264,13 +282,13 @@ function llmResponse(text) {
   currentPages = splitIntoPages(text);
   currentPage = 0;
   showPage(0);
-  document.getElementById('actionBtns').style.display = '';
+  document.getElementById('docActionBtns').style.display = '';
   if (currentPages.length > 1) {
-    document.getElementById('pageNav').style.display = '';
-    document.getElementById('pageTotal').textContent = currentPages.length;
-  } else { document.getElementById('pageNav').style.display = 'none'; }
-  document.getElementById('resultTitle').textContent = '🤖 Processed';
-  document.getElementById('saveToast').classList.remove('visible');
+    document.getElementById('docPageNav').style.display = '';
+    document.getElementById('docPageTotal').textContent = currentPages.length;
+  } else { document.getElementById('docPageNav').style.display = 'none'; }
+  document.getElementById('docResultTitle').textContent = '🤖 Processed';
+  document.getElementById('docSaveToast').classList.remove('visible');
   // Re-enable action buttons
   document.querySelectorAll('.action-btns .btn').forEach(b => b.disabled = false);
 }
@@ -279,7 +297,6 @@ function splitIntoPages(text) {
   // Try to split by page markers, fallback to chunks
   const parts = text.split(/=== PAGE \d+\/\d+ ===/);
   if (parts.length > 1) return parts.filter(p => p.trim()).map(p => p.trim());
-  // If text is long, split into ~3000 char chunks
   if (text.length > 4000) {
     const chunks = [];
     for (let i = 0; i < text.length; i += 3000) {
@@ -324,9 +341,165 @@ function addChat(role, text) {
   m.appendChild(d); m.scrollTop = m.scrollHeight;
 }
 
+// ═══════════════════════════════════════════
+//  🎬 Video — TimeLens2-8B Temporal Grounding
+// ═══════════════════════════════════════════
+
+// Video file selection
+document.getElementById('videoDropZone').addEventListener('click', async () => {
+  if (activeTab !== 'video') return;
+  try {
+    const p = await pywebview.api.pick_video();
+    if (p) selectVideoFile(p);
+  } catch(_) {}
+});
+
+async function selectVideoFile(path) {
+  videoPath = path;
+  hideError();
+
+  const info = await pywebview.api.file_info(path);
+
+  document.getElementById('videoDropContent').style.display = 'none';
+  document.getElementById('videoFilePreview').style.display = 'flex';
+  document.getElementById('videoFileName').textContent = info.name;
+  document.getElementById('videoFileSize').textContent = info.size_str;
+  document.getElementById('videoDropZone').classList.add('has-file', 'video-active');
+
+  // Enable query input and analyze button
+  document.getElementById('videoQuery').disabled = false;
+  document.getElementById('videoQuery').focus();
+  document.getElementById('videoAnalyzeBtn').disabled = false;
+
+  // Show result area
+  document.getElementById('videoResultArea').classList.add('visible');
+  document.getElementById('videoResultBody').innerHTML = '<div class="loading-indicator"><div style="font-size:28px;margin-bottom:8px">🎬</div><div>Enter a query and click Analyze</div></div>';
+}
+
+// Video analysis
+async function runTimelens() {
+  const query = document.getElementById('videoQuery').value.trim();
+  if (!videoPath || !query || videoProcessing) return;
+
+  videoProcessing = true;
+  document.getElementById('videoAnalyzeBtn').disabled = true;
+  document.getElementById('videoAnalyzeBtn').textContent = '⏳ Loading TimeLens2…';
+
+  // Ensure model is loaded
+  try {
+    await pywebview.api.start_timelens();
+  } catch(e) {}
+
+  // Wait a moment for status update, then show progress
+  await sleep(500);
+  showVideoProgress();
+
+  document.getElementById('videoResultArea').classList.add('visible');
+  document.getElementById('videoResultBody').innerHTML = '<div class="loading-indicator"><div class="spinner"></div><div>🧠 TimeLens2 analyzing video…</div></div>';
+
+  try {
+    await pywebview.api.timelens_process(videoPath, query);
+  } catch(e) {
+    showError(e);
+    videoProcessing = false;
+    document.getElementById('videoAnalyzeBtn').disabled = false;
+    document.getElementById('videoAnalyzeBtn').textContent = '🎯 Analyze';
+  }
+}
+
+function showVideoProgress() {
+  document.getElementById('videoResultBody').innerHTML = '<div class="loading-indicator"><div class="spinner" style="border-top-color:var(--video)"></div><div>🎬 TimeLens2 analyzing…</div><div style="font-size:10px;color:var(--text2);margin-top:4px">Processing video frames…</div></div>';
+}
+
+// Video results handler
+function timelensResult(resultStr) {
+  videoProcessing = false;
+  document.getElementById('videoAnalyzeBtn').disabled = false;
+  document.getElementById('videoAnalyzeBtn').textContent = '🎯 Analyze';
+  hideProgress();
+
+  const body = document.getElementById('videoResultBody');
+  body.innerHTML = '';
+
+  // Try to parse result as JSON time intervals
+  let intervals = [];
+  let rawText = resultStr;
+
+  try {
+    const parsed = JSON.parse(resultStr);
+    if (Array.isArray(parsed)) {
+      intervals = parsed;
+    } else if (parsed.error) {
+      body.innerHTML = '<div class="timeline-empty">❌ ' + escHtml(parsed.error) + '</div>';
+      return;
+    }
+  } catch(e) {
+    // Not JSON — try to extract intervals from text
+    body.innerHTML = '';
+    const pre = document.createElement('pre');
+    pre.textContent = resultStr || '[no output]';
+    body.appendChild(pre);
+    return;
+  }
+
+  const query = document.getElementById('videoQuery').value.trim();
+
+  if (intervals.length === 0) {
+    body.innerHTML = '<div class="timeline-empty">🔍 No matching time spans found for this query</div>';
+    return;
+  }
+
+  // Find max end time for timeline scale
+  const maxTime = Math.max(...intervals.map(i => i[1]), 10);
+
+  // Build timeline HTML
+  let html = '<div class="timeline-wrap">';
+  html += '<div class="timeline-query">🔍 <strong>' + escHtml(query) + '</strong></div>';
+  html += '<div class="timeline-bar">';
+
+  for (const [start, end] of intervals) {
+    const leftPct = (start / maxTime) * 100;
+    const widthPct = ((end - start) / maxTime) * 100;
+    html += `<div class="timeline-segment" style="left:${leftPct}%;width:${Math.max(widthPct, 2)}%;" title="${start}s - ${end}s">${widthPct > 8 ? start + 's' : ''}</div>`;
+  }
+
+  html += '</div>';
+  html += '<div class="timeline-labels"><span>0s</span><span>' + Math.round(maxTime) + 's</span></div>';
+  html += '</div>';
+
+  // List intervals
+  html += '<div style="margin-top:8px">';
+  html += '<div style="font-size:10px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">⏱ Time Spans</div>';
+  intervals.forEach(([start, end], i) => {
+    const dur = (end - start).toFixed(1);
+    html += `<div class="timeline-interval">${i + 1}. <strong>${start.toFixed(1)}s → ${end.toFixed(1)}s</strong> (${dur}s duration)</div>`;
+  });
+  html += '</div>';
+
+  // Raw JSON toggle
+  html += '<details style="margin-top:12px">';
+  html += '<summary style="font-size:10px;color:var(--text2);cursor:pointer">📋 Raw output</summary>';
+  html += '<pre style="font-size:10px;margin-top:4px;color:var(--text2)">' + escHtml(resultStr) + '</pre>';
+  html += '</details>';
+
+  body.innerHTML = html;
+}
+
+// Video cancel
+function cancelVideo() {
+  videoProcessing = false;
+  document.getElementById('videoAnalyzeBtn').disabled = false;
+  document.getElementById('videoAnalyzeBtn').textContent = '🎯 Analyze';
+  pywebview.api.cancel_timelens();
+}
+
 // ═══ Cancel ──
 function cancelCurrent() {
-  if (currentType === 'image') pywebview.api.cancel_ocr();
+  if (activeTab === 'video') {
+    cancelVideo();
+  } else {
+    if (currentType === 'image') pywebview.api.cancel_ocr();
+  }
   hideProgress(); isProcessing = false;
   showError('Cancelled');
 }
@@ -348,9 +521,9 @@ function showError(m) { hideProgress(); isProcessing = false;
   document.getElementById('errorBanner').textContent = '❌ ' + m;
   document.getElementById('errorBanner').classList.add('visible'); }
 function hideError() { document.getElementById('errorBanner').classList.remove('visible'); }
-function clearResult() { document.getElementById('resultBody').innerHTML = '<div class="loading-indicator"><div class="spinner"></div><div>Select a file</div></div>';
-  document.getElementById('resultTitle').textContent = 'Ready';
-  document.getElementById('actionBtns').style.display = 'none'; }
+function clearDocResult() { document.getElementById('docResultBody').innerHTML = '<div class="loading-indicator"><div class="spinner"></div><div>Select a file</div></div>';
+  document.getElementById('docResultTitle').textContent = 'Ready';
+  document.getElementById('docActionBtns').style.display = 'none'; }
 
 function copyAll() {
   const text = currentFullText || (currentPages[currentPage] || '');

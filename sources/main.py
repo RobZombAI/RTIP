@@ -17,7 +17,8 @@ def auto_install():
                      (('PIL',), 'pillow'),
                      (('torchvision',), 'torchvision'),
                      (('fitz',), 'PyMuPDF'),
-                     (('psutil',), 'psutil')]:
+                     (('psutil',), 'psutil'),
+                     (('qwen_vl_utils',), 'qwen-vl-utils')]:
         try:
             __import__(mod[0])
         except:
@@ -35,6 +36,7 @@ except ImportError:
 
 import fitz
 from lighton_ocr import ensure_loaded as ocr_ensure, unload as ocr_unload, is_loaded, ocr_image
+import timelens_video
 
 # ── Paths ──
 APP_DIR = Path(__file__).parent.resolve()
@@ -71,15 +73,18 @@ TOTAL_RAM_GB = get_system_ram_gb()
 MODEL_REQUIREMENTS = {
     'ocr': {'name': 'LightOnOCR-2-1B', 'min_ram_gb': 4, 'file': None, 'size_gb': 2},
     'llm': {'name': 'Agents A1 Q8_0', 'min_ram_gb': 48, 'file': LLM_MODEL, 'size_gb': 34},
+    'timelens': {'name': 'TimeLens2-8B', 'min_ram_gb': 20, 'file': None, 'size_gb': 16},
 }
 
 # Determine which models are compatible
 OCR_OK = TOTAL_RAM_GB >= MODEL_REQUIREMENTS['ocr']['min_ram_gb']
 LLM_OK = TOTAL_RAM_GB >= MODEL_REQUIREMENTS['llm']['min_ram_gb']
+TIMELENS_OK = TOTAL_RAM_GB >= MODEL_REQUIREMENTS['timelens']['min_ram_gb']
 LLM_FILE_EXISTS = LLM_MODEL.exists()
 SYSTEM_INFO = {
     'ram_gb': TOTAL_RAM_GB,
     'ocr': OCR_OK,
+    'timelens': TIMELENS_OK,
     'llm': LLM_OK,
     'llm_file': LLM_FILE_EXISTS,
     'llm_model_name': 'Agents A1',
@@ -90,6 +95,7 @@ SYSTEM_INFO = {
                else (f'⚠️ Need {MODEL_REQUIREMENTS["llm"]["min_ram_gb"]}GB+ RAM for Agents A1 (have {TOTAL_RAM_GB}GB)'
                      if not LLM_OK
                      else f'⚠️ Download Agents A1 ({MODEL_REQUIREMENTS["llm"]["size_gb"]}GB) to enable AI features'),
+    'msg_timelens': '✅ TimeLens2-8B ready' if TIMELENS_OK else f'⚠️ Need {MODEL_REQUIREMENTS["timelens"]["min_ram_gb"]}GB+ RAM for TimeLens',
 }
 
 # ═══════════════════════════════════════════
@@ -203,7 +209,7 @@ class Api:
     def ping(self): return 'pong'
 
     def get_status(self):
-        return {'ocr': is_loaded(), 'llm': llm_alive(), 'llm_model': LLM_FILE_EXISTS}
+        return {'ocr': is_loaded(), 'llm': llm_alive(), 'timelens': timelens_video.is_loaded(), 'llm_model': LLM_FILE_EXISTS}
 
     def get_system_info(self):
         return json.dumps(SYSTEM_INFO)
@@ -232,6 +238,50 @@ class Api:
     def stop_llm(self):
         stop_llm()
         if self.window: self.window.evaluate_js("updateStatus({'llm': False})")
+
+    # ── TimeLens2-8B (Video Temporal Grounding) ──
+    def start_timelens(self):
+        def task():
+            ok = timelens_video.ensure_loaded()
+            if self.window:
+                self.window.evaluate_js(f"updateStatus({json.dumps({'timelens': ok})})")
+        threading.Thread(target=task, daemon=True).start()
+        if self.window:
+            self.window.evaluate_js("updateStatus({'timelens': 'loading'})")
+
+    def stop_timelens(self):
+        timelens_video.unload()
+        if self.window: self.window.evaluate_js("updateStatus({'timelens': False})")
+
+    def timelens_process(self, video_path, query):
+        """Run TimeLens2-8B temporal grounding on video with query."""
+        tom_cancel = threading.Event()
+        def task():
+            try:
+                if self.window: self.window.evaluate_js('showVideoProgress()')
+                if not timelens_video.ensure_loaded():
+                    if self.window: self.window.evaluate_js("showError('TimeLens2 model not available')")
+                    return
+                result = timelens_video.process_video(video_path, query, tom_cancel)
+                if self.window:
+                    self.window.evaluate_js(f"timelensResult({json.dumps(result)})")
+            except Exception as e:
+                import traceback; traceback.print_exc()
+                if self.window: self.window.evaluate_js(f"showError({json.dumps(str(e))})")
+        threading.Thread(target=task, daemon=True).start()
+        return 'started'
+
+    def cancel_timelens(self):
+        timelens_video.unload()
+        if self.window: self.window.evaluate_js("updateStatus({'timelens': False})")
+
+    def pick_video(self):
+        s = '''set f to choose file with prompt "Select a video" of type {"public.mpeg-4","public.avi","com.apple.quicktime-movie"} default location (path to desktop)
+return POSIX path of f'''
+        try:
+            r = subprocess.check_output(['osascript', '-e', s]).decode().strip()
+            return r or None
+        except: return None
 
     def download_llm(self):
         """Download Agents A1 model in background."""
@@ -410,6 +460,7 @@ return POSIX path of f'''
 def on_shutdown():
     ocr_unload()
     stop_llm()
+    timelens_video.unload()
 
 if __name__ == '__main__':
     atexit.register(on_shutdown)
