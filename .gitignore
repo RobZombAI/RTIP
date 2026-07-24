@@ -11,6 +11,9 @@ venv/
 # macOS
 .DS_Store
 
+# Profiling
+*.profraw
+
 # Output files
 output/
 *.txt
