@@ -458,14 +458,27 @@ return POSIX path of f'''
 # ═══════════════════════════════════════════
 
 def on_shutdown():
-    ocr_unload()
-    stop_llm()
-    timelens_video.unload()
+    """Cleanup all models — chiamata su qualsiasi uscita."""
+    print("[RTIP] Cleaning up...", file=sys.stderr)
+    try:
+        ocr_unload()
+    except: pass
+    try:
+        stop_llm()
+    except: pass
+    try:
+        timelens_video.unload()
+    except: pass
+    print("[RTIP] Cleanup done", file=sys.stderr)
+
+def sighandler(sig, frame):
+    on_shutdown()
+    sys.exit(0)
 
 if __name__ == '__main__':
     atexit.register(on_shutdown)
-    signal.signal(signal.SIGTERM, lambda *a: (on_shutdown(), sys.exit(0)))
-    signal.signal(signal.SIGINT, lambda *a: (on_shutdown(), sys.exit(0)))
+    signal.signal(signal.SIGTERM, sighandler)
+    signal.signal(signal.SIGINT, sighandler)
 
     threading.Thread(target=auto_install, daemon=True).start()
     api = Api()
@@ -492,4 +505,4 @@ if __name__ == '__main__':
     api.window = window
     webview.start(debug=False, http_server=True, private_mode=False)
     on_shutdown()
-    os._exit(0)
+    sys.exit(0)

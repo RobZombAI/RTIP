@@ -10,7 +10,7 @@ echo "🔨 Building RTIP.app..."
 rm -rf "$APP" 2>/dev/null
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 
-# Launcher — venv with pywebview + port cleanup
+# Launcher — kill vecchie istanze + avvio pulito
 cat > "$APP/Contents/MacOS/RTIP" << 'LAUNCHER'
 #!/bin/bash
 DIR="$(cd "$(dirname "$0")/.." && pwd)"
@@ -22,7 +22,13 @@ unset PYTHONHOME PYTHONPATH
 
 echo "[$(date)] Starting RTIP..." > "$LOGFILE"
 
-# Kill any leftover python processes holding pywebview ports
+# Kill ANY previous RTIP instance (non solo per porta)
+for PID in $(pgrep -f "Resources/main.py" 2>/dev/null); do
+  kill -9 "$PID" 2>/dev/null
+  echo "[$(date)] Killed old RTIP (PID $PID)" >> "$LOGFILE"
+done
+
+# Also clean any leftover python on RTIP ports
 for port in 8125 8126 8127 8128; do
   PID=$(lsof -ti :$port 2>/dev/null)
   if [ -n "$PID" ]; then
@@ -51,9 +57,9 @@ cat > "$APP/Contents/Info.plist" << PLIST
     <key>CFBundleDisplayName</key>
     <string>RTIP — ReadingTextImgPdf</string>
     <key>CFBundleVersion</key>
-    <string>1.0.0</string>
+    <string>2.0.0</string>
     <key>CFBundleShortVersionString</key>
-    <string>1.0</string>
+    <string>2.0</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>LSMinimumSystemVersion</key>
