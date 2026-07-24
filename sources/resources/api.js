@@ -42,6 +42,28 @@ function showSystemInfo() {
   el.textContent = '🧠 ' + systemInfo.ram_gb + 'GB · ' + systemInfo.msg_ocr + ' · ' + systemInfo.msg_llm + ' · ' + systemInfo.msg_timelens;
   bar.appendChild(el);
   if (systemInfo.llm && !systemInfo.llm_file) addDownloadUI();
+
+  // Color RAM chips based on actual hardware
+  updateRamChips();
+}
+
+function updateRamChips() {
+  if (!systemInfo) return;
+  // Map: chip text pattern → min_ram value
+  const chips = {
+    '≥4GB RAM': { ok: 4, pass: systemInfo.ocr },
+    '≥48GB RAM': { ok: 48, pass: systemInfo.llm && systemInfo.llm_file },
+    '≥20GB RAM': { ok: 20, pass: systemInfo.timelens },
+  };
+  document.querySelectorAll('.chip .ram').forEach(el => {
+    const text = el.textContent.trim();
+    const info = chips[text];
+    if (info) {
+      el.className = 'ram ' + (info.pass ? 'ok' : 'nok');
+    } else if (text === '0 GPU') {
+      el.className = 'ram ok';
+    }
+  });
 }
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }

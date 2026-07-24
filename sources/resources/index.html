@@ -121,6 +121,14 @@ header h1 span { color:var(--accent); }
 
 /* Chat */
 .chat-section { border-top:1px solid var(--border); background:var(--surface); padding:6px 10px; flex-shrink:0; display:flex; flex-direction:column; gap:4px; }
+
+/* Tech info cards */
+.tech-info { flex-shrink:0; background:var(--surface); border:1px solid var(--border); border-radius:6px; padding:6px 10px; font-size:9px; line-height:1.5; color:var(--text2); display:flex; flex-wrap:wrap; gap:4px 12px; }
+.tech-info .chip { display:inline-flex; align-items:center; gap:3px; }
+.tech-info .chip strong { color:var(--text); }
+.tech-info .chip .ram { color:var(--warning); font-weight:600; }
+.tech-info .chip .ram.ok { color:var(--success); }
+.tech-info .chip .ram.nok { color:var(--error); }
 .chat-input { display:flex; gap:4px; }
 .chat-input textarea { flex:1; min-height:30px; max-height:60px; padding:4px 8px; border:1px solid var(--border); border-radius:4px; background:var(--bg); color:var(--text); font-size:11px; outline:none; resize:vertical; }
 .chat-input textarea:focus { border-color:var(--accent); }
@@ -231,6 +239,12 @@ footer { text-align:center; padding:3px; font-size:8px; color:var(--text2); bord
         </div>
       </div>
 
+      <div class="tech-info" id="docTechInfo">
+        <span class="chip">🖼️ <strong>LightOnOCR-2-1B</strong> — OCR da immagini · <span class="ram ok">≥4GB RAM</span></span>
+        <span class="chip">📄 <strong>PyMuPDF</strong> — Estrazione testo PDF · <span class="ram ok">0 GPU</span></span>
+        <span class="chip">🤖 <strong>Agents A1 (34B Q8)</strong> — Traduci/Riassumi/Chat · <span class="ram">≥48GB RAM</span></span>
+      </div>
+
       <div class="save-toast" id="docSaveToast">
         <span>💾</span><span class="path" id="docSavePath"></span>
         <button class="btn btn-ghost btn-sm" onclick="copyAll()">📋 Copy</button>
@@ -265,7 +279,7 @@ footer { text-align:center; padding:3px; font-size:8px; color:var(--text2); bord
         <div id="videoDropContent">
           <div class="icon">🎬</div>
           <div class="label">Click to select a video file</div>
-          <div class="sub">MP4, MOV — temporal grounding with TimeLens2-8B</div>
+          <div class="sub">MP4, MOV · Cerca scene con TimeLens2-8B (≥20GB RAM)</div>
         </div>
         <div id="videoFilePreview" style="display:none">
           <div class="file-meta">
@@ -280,6 +294,11 @@ footer { text-align:center; padding:3px; font-size:8px; color:var(--text2); bord
           <input type="text" id="videoQuery" placeholder="Describe what to find (e.g. &quot;A man opens the refrigerator&quot;)…" disabled>
           <button class="btn btn-video" id="videoAnalyzeBtn" disabled onclick="runTimelens()">🎯 Analyze</button>
         </div>
+      </div>
+
+      <div class="tech-info">
+        <span class="chip">🎬 <strong>TimeLens2-8B</strong> — Temporal grounding: trova scene in video da query testuale · <span class="ram ok">≥20GB RAM</span></span>
+        <span class="chip">🧠 basato su <strong>Qwen3-VL-8B</strong> · bfloat16 su MPS · output: intervalli [start,end] in secondi</span>
       </div>
 
       <div class="result-area" id="videoResultArea">
