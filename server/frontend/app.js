@@ -324,35 +324,69 @@ async function runTimelens() {
     }
 
     const maxTime = Math.max(...intervals.map(i => i[1]), 10);
-    let html = '<div class="timeline-wrap">';
-    html += `<div class="timeline-query">🔍 <strong>${escHtml(query)}</strong></div>`;
-    html += '<div class="timeline-bar" id="timelineBar">';
-    for (const [start, end] of intervals) {
+    const totalDur = intervals.reduce((s, [a, b]) => s + (b - a), 0);
+    const colors = ['#a371f7','#f472b6','#fb923c','#34d399','#60a5fa','#e879f9','#fbbf24','#67e8f9'];
+
+    // Header
+    let html = `<div class="timeline-wrap">
+      <div class="timeline-query">🔍 <strong>${escHtml(query)}</strong> — found <strong>${intervals.length}</strong> segment${intervals.length > 1 ? 's' : ''} (${totalDur.toFixed(1)}s total)</div>
+      <div class="timeline-controls">
+        <button class="btn btn-ghost btn-sm" id="playAllBtn" onclick="playAllSegments()">▶ Play All</button>
+        <button class="btn btn-ghost btn-sm" id="playPrevBtn" onclick="playPrevSegment()" disabled>◀</button>
+        <span id="segmentCounter" style="font-size:10px;color:var(--text2);margin:0 4px">—</span>
+        <button class="btn btn-ghost btn-sm" id="playNextBtn" onclick="playNextSegment()" disabled>▶</button>
+      </div>
+      <div class="timeline-bar-wrap">
+        <div class="timeline-bar" id="timelineBar">
+          <div class="timeline-playhead" id="playhead"></div>`;
+
+    for (let i = 0; i < intervals.length; i++) {
+      const [start, end] = intervals[i];
       const left = (start / maxTime) * 100;
-      const w = Math.max(((end - start) / maxTime) * 100, 2);
-      html += `<div class="timeline-segment" data-start="${start}" data-end="${end}" style="left:${left}%;width:${w}%;cursor:pointer" title="Play ${start}s - ${end}s">${w > 8 ? start + 's' : ''}</div>`;
+      const w = Math.max(((end - start) / maxTime) * 100, 1.5);
+      const color = colors[i % colors.length];
+      html += `<div class="timeline-segment" data-idx="${i}" data-start="${start}" data-end="${end}"
+        style="left:${left}%;width:${w}%;background:linear-gradient(135deg,${color},${color}cc);cursor:pointer"
+        title="Segment ${i+1}: ${start.toFixed(1)}s → ${end.toFixed(1)}s"></div>`;
     }
-    html += '</div>';
-    html += '<div class="timeline-labels"><span>0s</span><span>' + Math.round(maxTime) + 's</span></div>';
-    html += '</div>';
 
-    html += '<div style="margin-top:10px">';
-    html += '<div style="font-size:10px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">⏱ Time Spans — click to play ▶</div>';
-    intervals.forEach(([start, end], i) => {
+    html += `</div>
+      <div class="timeline-labels"><span>0s</span><span id="currentTimeLabel" style="font-weight:600;color:var(--video)">0.0s</span><span>${maxTime.toFixed(0)}s</span></div>
+    </div>`;
+
+    // Segment list
+    html += `<div class="segment-list">`;
+    for (let i = 0; i < intervals.length; i++) {
+      const [start, end] = intervals[i];
       const dur = (end - start).toFixed(1);
-      html += `<div class="timeline-interval" data-start="${start}" data-end="${end}" style="cursor:pointer;padding:3px 6px;border-radius:4px;transition:0.15s" onclick="playSegment(${start},${end})" onmouseover="this.style.background='var(--surface3)'" onmouseout="this.style.background=''">${i+1}. <strong>${start.toFixed(1)}s → ${end.toFixed(1)}s</strong> (${dur}s) ▶</div>`;
-    });
-    html += '</div>';
+      const color = colors[i % colors.length];
+      html += `<div class="segment-item" data-idx="${i}" data-start="${start}" data-end="${end}"
+        onclick="playSegment(${start},${end},${i})"
+        onmouseover="this.style.background='var(--surface2)'" onmouseout="this.style.background=''"
+        style="border-left:3px solid ${color}">
+        <span class="segment-num" style="background:${color}22;color:${color}">${i+1}</span>
+        <span class="segment-time"><strong>${start.toFixed(1)}s</strong> → <strong>${end.toFixed(1)}s</strong></span>
+        <span class="segment-dur">${dur}s</span>
+        <button class="btn btn-icon btn-sm" onclick="event.stopPropagation();playSegment(${start},${end},${i})" title="Play">▶</button>
+      </div>`;
+    }
+    html += `</div>`;
 
-    html += `<details><summary style="font-size:10px;color:var(--text3);cursor:pointer">📋 Raw output</summary>
+    // Current segment info
+    html += `<div class="segment-player-info" id="segmentInfo" style="display:none">
+      <div class="segment-progress"><div class="segment-progress-bar" id="segProgress"></div></div>
+    </div>`;
+
+    html += `<details style="margin-top:6px"><summary style="font-size:10px;color:var(--text3);cursor:pointer">📋 Raw output</summary>
       <pre style="font-size:10px;margin-top:4px;color:var(--text2)">${escHtml(data.raw || '')}</pre></details>`;
 
     body.innerHTML = html;
 
-    // Add click handlers to timeline segments
-    document.querySelectorAll('.timeline-segment[data-start]').forEach(el => {
+    // Click handlers for timeline segments
+    document.querySelectorAll('.timeline-segment').forEach(el => {
       el.addEventListener('click', () => {
-        playSegment(parseFloat(el.dataset.start), parseFloat(el.dataset.end));
+        const i = parseInt(el.dataset.idx);
+        playSegment(parseFloat(el.dataset.start), parseFloat(el.dataset.end), i);
       });
     });
   } catch(e) {
@@ -427,27 +461,136 @@ async function delSession(sid) {
 
 // ── Utils ──
 
-// Play video segment (called from timeline clicks)
-function playSegment(start, end) {
+// Segment playback state
+let _segments = [];
+let _currentSegIdx = -1;
+let _playingAll = false;
+let _segTimeUpdate = null;
+
+// Play video segment
+function playSegment(start, end, idx) {
   const player = document.getElementById('videoPlayer');
   if (!player || !player.src) return;
+
+  // Store segments reference
+  const items = document.querySelectorAll('.segment-item');
+  _currentSegIdx = (idx !== undefined && idx >= 0) ? idx : 0;
+  _playingAll = false;
+  document.getElementById('playAllBtn').textContent = '▶ Play All';
+
+  // Update UI
   player.currentTime = start;
   player.play();
+
+  // Highlight active segment
   document.querySelectorAll('.timeline-segment').forEach(el => {
-    el.style.opacity = '0.4';
+    el.style.opacity = '0.35';
     el.style.boxShadow = 'none';
   });
-  document.querySelectorAll(`.timeline-segment[data-start="${start}"]`).forEach(el => {
+  document.querySelectorAll(`.timeline-segment[data-idx="${_currentSegIdx}"]`).forEach(el => {
     el.style.opacity = '1';
-    el.style.boxShadow = '0 0 15px rgba(163, 113, 247, 0.7)';
+    el.style.boxShadow = '0 0 12px rgba(163, 113, 247, 0.6)';
   });
-  const onTime = () => {
-    if (player.currentTime >= end) {
+
+  document.querySelectorAll('.segment-item').forEach(el => el.classList.remove('active'));
+  const active = document.querySelector(`.segment-item[data-idx="${_currentSegIdx}"]`);
+  if (active) {
+    active.classList.add('active');
+    active.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
+
+  updateSegmentCounter();
+  enableNavButtons();
+
+  // Show progress
+  const segInfo = document.getElementById('segmentInfo');
+  if (segInfo) segInfo.style.display = 'flex';
+
+  // Remove old listener
+  if (_segTimeUpdate) {
+    player.removeEventListener('timeupdate', _segTimeUpdate);
+  }
+
+  const thisStart = start, thisEnd = end, thisIdx = idx;
+  _segTimeUpdate = () => {
+    const t = player.currentTime;
+    // Update playhead position
+    const maxTime = parseFloat(document.querySelector('.timeline-labels span:last-child')?.textContent || '10');
+    const pct = (t / maxTime) * 100;
+    const ph = document.getElementById('playhead');
+    if (ph) ph.style.left = Math.min(pct, 100) + '%';
+    // Update time label
+    const tl = document.getElementById('currentTimeLabel');
+    if (tl) tl.textContent = t.toFixed(1) + 's';
+    // Update progress bar
+    const segDur = thisEnd - thisStart;
+    const segPct = segDur > 0 ? ((t - thisStart) / segDur) * 100 : 0;
+    const pb = document.getElementById('segProgress');
+    if (pb) pb.style.width = Math.min(Math.max(segPct, 0), 100) + '%';
+
+    // Auto-stop at end
+    if (t >= thisEnd) {
       player.pause();
-      player.removeEventListener('timeupdate', onTime);
+      if (_playingAll && _currentSegIdx < _segments.length - 1) {
+        playNextSegment();
+      }
     }
   };
-  player.addEventListener('timeupdate', onTime);
+  player.addEventListener('timeupdate', _segTimeUpdate);
+}
+
+function playAllSegments() {
+  const items = document.querySelectorAll('.segment-item');
+  if (items.length === 0) return;
+
+  // Store intervals
+  _segments = [];
+  items.forEach(el => {
+    _segments.push({
+      start: parseFloat(el.dataset.start),
+      end: parseFloat(el.dataset.end),
+      idx: parseInt(el.dataset.idx),
+    });
+  });
+
+  _playingAll = !_playingAll;
+  const btn = document.getElementById('playAllBtn');
+
+  if (!_playingAll) {
+    btn.textContent = '▶ Play All';
+    return;
+  }
+
+  btn.textContent = '⏸ Pause All';
+  playSegment(_segments[0].start, _segments[0].end, 0);
+}
+
+function playNextSegment() {
+  const items = document.querySelectorAll('.segment-item');
+  if (_currentSegIdx < items.length - 1) {
+    const el = items[_currentSegIdx + 1];
+    playSegment(parseFloat(el.dataset.start), parseFloat(el.dataset.end), _currentSegIdx + 1);
+  }
+}
+
+function playPrevSegment() {
+  if (_currentSegIdx > 0) {
+    const items = document.querySelectorAll('.segment-item');
+    const el = items[_currentSegIdx - 1];
+    playSegment(parseFloat(el.dataset.start), parseFloat(el.dataset.end), _currentSegIdx - 1);
+  }
+}
+
+function updateSegmentCounter() {
+  const total = document.querySelectorAll('.segment-item').length;
+  const el = document.getElementById('segmentCounter');
+  if (el) el.textContent = _currentSegIdx >= 0 ? `${_currentSegIdx + 1} / ${total}` : '—';
+}
+
+function enableNavButtons() {
+  const total = document.querySelectorAll('.segment-item').length;
+  document.getElementById('playPrevBtn').disabled = _currentSegIdx <= 0;
+  document.getElementById('playNextBtn').disabled = _currentSegIdx >= total - 1;
 }
 
 function showOverlay(label) {
